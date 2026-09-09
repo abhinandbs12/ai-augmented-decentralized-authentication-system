@@ -1,0 +1,66 @@
+# Docker Compose — AI-Augmented Decentralized Auth System
+# Placeholder — will be fleshed out during integration phase.
+
+version: "3.9"
+
+services:
+  # --- Blockchain ---
+  hardhat:
+    build: ./contracts
+    ports:
+      - "8545:8545"
+
+  # --- Backend Services ---
+  gateway:
+    build: ./services/gateway
+    ports:
+      - "3000:3000"
+    env_file: .env
+    depends_on:
+      - orchestrator
+
+  orchestrator:
+    build: ./services/orchestrator
+    ports:
+      - "3001:3001"
+    env_file: .env
+    depends_on:
+      - postgres
+      - mongo
+      - risk-engine
+      - hardhat
+
+  risk-engine:
+    build: ./services/risk-engine
+    ports:
+      - "8001:8001"
+    env_file: .env
+    depends_on:
+      - mongo
+
+  # --- Data Stores ---
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: authpass
+      POSTGRES_DB: authdb
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+
+  # --- Automation ---
+  # n8n:
+  #   image: n8nio/n8n
+  #   ports:
+  #     - "5678:5678"
+
+  # --- Web App (dev server) ---
+  # web:
+  #   build: ./apps/web
+  #   ports:
+  #     - "5173:5173"
