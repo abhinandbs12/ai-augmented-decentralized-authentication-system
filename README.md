@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔐 AI-Augmented Decentralized Authentication System
+# AI-Augmented Decentralized Authentication System
 ### *for Fraud-Resistant Identity Verification*
 
 **An AI-Enhanced, Fraud-Resistant Decentralized Authentication Ecosystem**
@@ -14,41 +14,40 @@
 [![Flutter](https://img.shields.io/badge/Flutter-Mobile-02569B?logo=flutter&logoColor=white)]()
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)]()
 
-**Final Year Project · Department of Computer Science & Engineering**
+**Final Year Project -- Department of Computer Science & Engineering**
 
 </div>
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
-- [Overview](#-overview)
-- [Why This Project Matters](#-why-this-project-matters)
-- [The Problem](#-the-problem)
-- [Key Features](#-key-features)
-- [System Architecture](#-system-architecture)
-- [Tech Stack](#-tech-stack)
-- [Login Flow](#-login-flow)
-- [AI Risk Engine](#-ai-risk-engine)
-- [Data Structures & Algorithms](#-data-structures--algorithms)
-- [Smart Contract](#-smart-contract)
-- [API Reference](#-api-reference)
-- [Data Model](#-data-model)
-- [Project Structure](#-project-structure)
-- [Getting Started](#-getting-started)
-- [Testing](#-testing)
-- [Security Considerations](#-security-considerations)
-- [Success Metrics / KPIs](#-success-metrics--kpis)
-- [Roadmap](#-roadmap--future-enhancements)
-- [Competitive Analysis](#-competitive--alternative-approaches)
-- [Team](#-team)
-- [Companion Artifacts](#-companion-artifacts)
-- [References](#-references)
-- [License](#-license)
+- [Overview](#overview)
+- [Why This Project Matters](#why-this-project-matters)
+- [The Problem](#the-problem)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Tech Stack](#tech-stack)
+- [Login Flow](#login-flow)
+- [AI Risk Engine](#ai-risk-engine)
+- [Data Structures and Algorithms](#data-structures-and-algorithms)
+- [Smart Contract](#smart-contract)
+- [API Reference](#api-reference)
+- [Data Model](#data-model)
+- [Project Structure](#project-structure)
+- [Getting Started](#getting-started)
+- [Testing](#testing)
+- [Security Considerations](#security-considerations)
+- [Success Metrics and KPIs](#success-metrics-and-kpis)
+- [Roadmap and Future Enhancements](#roadmap-and-future-enhancements)
+- [Competitive Analysis](#competitive-and-alternative-approaches)
+- [Team](#team)
+- [References](#references)
+- [License](#license)
 
 ---
 
-## 🧭 Overview
+## Overview
 
 Password-based authentication remains one of the most exploited attack surfaces on the web. Centralized credential stores are a single point of failure, every login receives identical scrutiny regardless of actual risk, and conventional audit logs can be silently altered after the fact.
 
@@ -60,16 +59,16 @@ Classic data structures and algorithms — a **Merkle tree** for tamper-evident 
 
 ---
 
-## 💡 Why This Project Matters
+## Why This Project Matters
 
-- ✅ Aligns with the **Zero Trust** security model adopted across the industry
-- ✅ Sits inside the **passwordless authentication** trend led by Google, Apple, and Microsoft (passkeys)
-- ✅ Applies core CS theory — graphs, trees, hashing, caching, rate limiting — to a real engineering problem, not as an academic exercise in isolation
-- ✅ Spans the full stack: frontend, backend, blockchain, applied AI, DevOps, and workflow automation
+- Aligns with the **Zero Trust** security model adopted across the industry
+- Sits inside the **passwordless authentication** trend led by Google, Apple, and Microsoft (passkeys)
+- Applies core CS theory — graphs, trees, hashing, caching, rate limiting — to a real engineering problem, not as an academic exercise in isolation
+- Spans the full stack: frontend, backend, blockchain, applied AI, DevOps, and workflow automation
 
 ---
 
-## ❗ The Problem
+## The Problem
 
 | # | Problem | Consequence |
 |---|---------|--------------|
@@ -83,21 +82,21 @@ Classic data structures and algorithms — a **Merkle tree** for tamper-evident 
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-- 🔑 **Passwordless, wallet-based identity** — register and log in via a public/private key pair (MetaMask / WalletConnect), with optional WebAuthn/passkey support
-- 🧠 **Real-time AI Trust Scoring (0–100)** — every login is scored and routed: allow / OTP step-up / block
-- 🕸️ **Graph-based fraud ring detection** — bounded BFS across a wallet/IP/device adjacency graph flags coordinated attacks
-- ⛓️ **Blockchain-anchored audit trail** — Merkle-batched login events with on-chain roots and per-event proofs
-- 🛑 **Circuit breaker** — an emergency `pauseAuth()` halts all authentication system-wide during a detected mass attack
-- 📊 **Live 3D threat graph** — React + Three.js force-directed visualization of login activity and flagged clusters
-- 📱 **Mobile biometric approval** — Flutter companion app for FaceID/fingerprint login approval
-- 🤖 **Automated step-up verification** — n8n + Twilio workflow for SMS OTP and admin alerting
-- 🐳 **One-command local deployment** — full stack via Docker Compose
+- **Passwordless, wallet-based identity** — register and log in via a public/private key pair (MetaMask / WalletConnect), with optional WebAuthn/passkey support
+- **Real-time AI Trust Scoring (0-100)** — every login is scored and routed: allow / OTP step-up / block
+- **Graph-based fraud ring detection** — bounded BFS across a wallet/IP/device adjacency graph flags coordinated attacks
+- **Blockchain-anchored audit trail** — Merkle-batched login events with on-chain roots and per-event proofs
+- **Circuit breaker** — an emergency `pauseAuth()` halts all authentication system-wide during a detected mass attack
+- **Live 3D threat graph** — React + Three.js force-directed visualization of login activity and flagged clusters
+- **Mobile biometric approval** — Flutter companion app for FaceID/fingerprint login approval
+- **Automated step-up verification** — n8n + Twilio workflow for SMS OTP and admin alerting
+- **One-command local deployment** — full stack via Docker Compose
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 The system follows a **layered, service-oriented architecture**. A client layer (web + mobile) talks to a backend orchestrator over HTTPS/WebSocket, which coordinates three peer services — the AI risk engine, the blockchain client, and the automation layer — while structured and unstructured data are split across two purpose-fit databases.
 
@@ -112,13 +111,11 @@ The system follows a **layered, service-oriented architecture**. A client layer 
 | **Data Layer** | Supabase (structured profiles) + MongoDB (unstructured behavioral telemetry) |
 | **Visualization Layer** | React + Three.js live 3D threat graph and admin dashboard |
 
-> A full component/data-flow diagram is maintained separately as `architecture-diagram.svg` (see [Companion Artifacts](#-companion-artifacts)).
-
 All backend services are containerized and orchestrated via **Docker Compose**, so the entire stack starts with a single command. Client apps run outside the container boundary since they execute on the user's own device.
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
@@ -136,36 +133,36 @@ All backend services are containerized and orchestrated via **Docker Compose**, 
 
 ---
 
-## 🔄 Login Flow
+## Login Flow
 
 ```
 Client                Gateway            Orchestrator          AI Engine        Smart Contract
-  │  1. Login request     │                    │                    │                  │
-  ├───────────────────────►                    │                    │                  │
-  │                       │ 2. Token bucket    │                    │                  │
-  │                       │    check           │                    │                  │
-  │                       ├────────────────────►                    │                  │
-  │                       │                    │ 3. LRU cache check │                  │
-  │                       │                    │ 4. Update threat   │                  │
-  │                       │                    │    graph           │                  │
-  │                       │                    ├────────────────────► 5. Score + BFS   │
-  │                       │                    ◄────────────────────┤ 6. Trust Score   │
-  │                       │                    │                    │                  │
-  │                       │        7. Route: high / medium (OTP) / low (block)         │
-  │  8. Sign nonce        │                    │                    │                  │
-  ◄───────────────────────┴────────────────────┤                    │                  │
-  ├──────────────────────────────────────────────────────────────────────────────────► │
-  │                       │                    │ 9. verifySignature()                  │
-  │                       │                    │ 10. Create + cache session            │
-  │                       │                    │ 11. Queue event for Merkle batching   │
-  │                       │                    │ 12. Push update → 3D threat graph     │
+  |  1. Login request     |                    |                    |                  |
+  |---------------------->                     |                    |                  |
+  |                       | 2. Token bucket    |                    |                  |
+  |                       |    check           |                    |                  |
+  |                       |------------------->                     |                  |
+  |                       |                    | 3. LRU cache check |                  |
+  |                       |                    | 4. Update threat   |                  |
+  |                       |                    |    graph           |                  |
+  |                       |                    |------------------->  5. Score + BFS   |
+  |                       |                    <-------------------|  6. Trust Score   |
+  |                       |                    |                    |                  |
+  |                       |        7. Route: high / medium (OTP) / low (block)         |
+  |  8. Sign nonce        |                    |                    |                  |
+  <-----------------------+--------------------|                    |                  |
+  |---------------------------------------------------------------------------->      |
+  |                       |                    | 9. verifySignature()                  |
+  |                       |                    | 10. Create + cache session            |
+  |                       |                    | 11. Queue event for Merkle batching   |
+  |                       |                    | 12. Push update -> 3D threat graph    |
 ```
 
 **Circuit Breaker:** if anomalous logins within a rolling window exceed a configured threshold, the Orchestrator calls `pauseAuth()`, all further logins are rejected regardless of Trust Score, and an admin alert is dispatched — until an administrator explicitly resumes the system.
 
 ---
 
-## 🧠 AI Risk Engine
+## AI Risk Engine
 
 ### Feature Extraction
 
@@ -181,28 +178,28 @@ Client                Gateway            Orchestrator          AI Engine        
 
 | Signal | Score Impact |
 |--------|--------------|
-| New / unrecognized device | −30 |
-| New / unrecognized IP or region | −20 |
-| Off-hours login | −10 |
-| High login velocity from same IP | −25 |
-| Short graph distance to known bad actor | −35 |
+| New / unrecognized device | -30 |
+| New / unrecognized IP or region | -20 |
+| Off-hours login | -10 |
+| High login velocity from same IP | -25 |
+| Short graph distance to known bad actor | -35 |
 | All signals normal | 0 (baseline 100) |
 
 ### Routing
 
 | Trust Score | Route |
 |-------------|-------|
-| **≥ 90** | Straight to signature verification |
-| **50 – 89** | SMS OTP step-up, then signature verification |
+| **>= 90** | Straight to signature verification |
+| **50 - 89** | SMS OTP step-up, then signature verification |
 | **< 50** | Blocked and logged |
 
 **Upgrade path:** an **Isolation Forest** anomaly-detection model is the proposed successor to the rule-based baseline — it needs no labeled fraud data (scarce for a student project) and naturally isolates rare, anomalous feature combinations.
 
-**Threat Graph:** adjacency list keyed by wallet/IP/device nodes; a login adds an edge between the wallet and the IP/device used. A bounded BFS (≈3 hops) runs from each new node to measure proximity to any flagged bad actor — `O(V' + E')` for the bounded neighborhood explored.
+**Threat Graph:** adjacency list keyed by wallet/IP/device nodes; a login adds an edge between the wallet and the IP/device used. A bounded BFS (3 hops max) runs from each new node to measure proximity to any flagged bad actor — `O(V' + E')` for the bounded neighborhood explored.
 
 ---
 
-## 🧮 Data Structures & Algorithms
+## Data Structures and Algorithms
 
 Every structure was chosen to solve a specific bottleneck — not for demonstration alone.
 
@@ -210,7 +207,7 @@ Every structure was chosen to solve a specific bottleneck — not for demonstrat
 |---|---|---|---|
 | **Token Bucket** | Rate limiting incoming requests | O(1) | O(1) per IP |
 | **Sliding Window Counter** | Smoothing burst-traffic detection | O(1) amortized | O(w) |
-| **LRU Cache** (HashMap + doubly linked list) | O(1) session validation & eviction | O(1) avg | O(k) |
+| **LRU Cache** (HashMap + doubly linked list) | O(1) session validation and eviction | O(1) avg | O(k) |
 | **Graph (adjacency list) + BFS** | Fraud-ring proximity detection | O(V'+E') bounded | O(V') |
 | **Merkle Tree** | Tamper-evident audit batching | O(n) build | O(n) |
 | **Merkle Proof Verification** | Verifying single-event authenticity | O(log n) | O(log n) |
@@ -219,7 +216,7 @@ Every structure was chosen to solve a specific bottleneck — not for demonstrat
 **Highlights:** Merkle proof verification is logarithmic in batch size, so even large batches stay cheap to verify independently. Every hot-path check on every request — rate limiting and session lookup — is **O(1)**, so the added security layers introduce no meaningful latency penalty over a conventional password check.
 
 <details>
-<summary><strong>📄 Reference implementations (click to expand)</strong></summary>
+<summary><strong>Reference implementations (click to expand)</strong></summary>
 
 **LRU Session Cache (Python)**
 ```python
@@ -290,7 +287,7 @@ function rateLimitMiddleware(req, res, next) {
 }
 ```
 
-**Merkle Tree Construction & Proof Verification (Python)**
+**Merkle Tree Construction and Proof Verification (Python)**
 ```python
 import hashlib
 
@@ -374,7 +371,7 @@ class RiskRankedAttempts:
 
 ---
 
-## ⛓️ Smart Contract
+## Smart Contract
 
 **Contract:** `AuthRegistry.sol` (Solidity `^0.8.20`, uses OpenZeppelin's audited ECDSA library)
 
@@ -394,7 +391,7 @@ class RiskRankedAttempts:
 **Deployment target:** local Hardhat network for development/demo, with an optional secondary deployment to a public testnet (e.g., Polygon testnet) to demonstrate real network/gas behavior.
 
 <details>
-<summary><strong>📄 Full contract source (click to expand)</strong></summary>
+<summary><strong>Full contract source (click to expand)</strong></summary>
 
 ```solidity
 // SPDX-License-Identifier: MIT
@@ -488,7 +485,7 @@ contract AuthRegistry {
 
 ---
 
-## 📡 API Reference
+## API Reference
 
 All endpoints are exposed by the Node.js Backend Orchestrator. Requests/responses are JSON; authenticated endpoints require a valid session token.
 
@@ -523,7 +520,7 @@ Response:
 }
 ```
 
-### Risk & Graph
+### Risk and Graph
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -547,7 +544,7 @@ Response:
 | `GET` | `/api/admin/attempts/top` | Top-N riskiest recent attempts (min-heap) |
 
 <details>
-<summary><strong>📄 More sample payloads</strong></summary>
+<summary><strong>More sample payloads</strong></summary>
 
 **`GET /api/audit/proof/:eventId`**
 ```json
@@ -575,7 +572,7 @@ Response:
 
 ---
 
-## 🗄️ Data Model
+## Data Model
 
 ### Supabase (PostgreSQL)
 
@@ -595,34 +592,69 @@ Response:
 
 | Storage Item | Description |
 |---|---|
-| `walletToPublicKey` mapping | Registered wallet → verified public key / DID |
+| `walletToPublicKey` mapping | Registered wallet to verified public key / DID |
 | `merkleRoots` array | Append-only list of submitted audit-batch roots |
 | `paused` (bool) | Global circuit-breaker flag |
 | `admin` address | Address authorized to call `pauseAuth()` / `resumeAuth()` |
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 .
-├── contracts/                 # Solidity smart contracts (AuthRegistry.sol) + Hardhat config
-├── orchestrator/               # Node.js / Express backend (gateway, rate limiter, LRU cache)
-├── ai-risk-engine/             # Python / FastAPI risk scoring + threat graph (BFS)
-├── merkle-service/             # Merkle batching & proof generation service
-├── automation/                 # n8n workflows (OTP step-up, admin alerts)
-├── web/                         # React + Three.js dashboard and identity vault UI
-├── mobile/                      # Flutter companion app (biometric approval)
-├── docker-compose.yml           # Single-command full-stack orchestration
-└── docs/                        # architecture-diagram.svg, gantt-chart.svg, PRD, etc.
+├── contracts/                       # Solidity smart contracts (AuthRegistry.sol) + Hardhat config
+│   ├── contracts/AuthRegistry.sol
+│   ├── scripts/deploy.ts
+│   ├── test/authRegistry.test.ts
+│   ├── hardhat.config.ts
+│   └── package.json
+├── services/
+│   ├── gateway/                     # Express.js API gateway (rate limiter, request validation)
+│   │   ├── src/index.ts
+│   │   ├── Dockerfile
+│   │   └── package.json
+│   ├── orchestrator/                # Node.js backend (LRU cache, session mgmt, event queue)
+│   │   ├── src/index.ts
+│   │   ├── Dockerfile
+│   │   └── package.json
+│   └── risk-engine/                 # Python / FastAPI risk scoring + threat graph (BFS)
+│       ├── app/
+│       │   ├── main.py              # FastAPI endpoints: POST /score, GET /health
+│       │   ├── features.py          # Feature extraction (device, region, time, velocity)
+│       │   ├── geo.py               # Offline IP geolocation lookup
+│       │   ├── scorers/rules.py     # Rule-based Trust Score calculator
+│       │   └── graph/
+│       │       ├── threat_graph.py  # Adjacency-list graph (wallet/IP/device nodes)
+│       │       └── bfs.py           # Bounded BFS (3-hop fraud proximity)
+│       ├── data/demo_geo_overrides.json
+│       ├── tests/                   # pytest suite (50 tests)
+│       ├── requirements.txt
+│       └── Dockerfile
+├── apps/
+│   ├── web/                         # React + Three.js dashboard and identity vault UI
+│   │   ├── src/
+│   │   │   ├── App.tsx
+│   │   │   └── pages/admin/Attempts.tsx
+│   │   └── package.json
+│   └── mobile/                      # Flutter companion app (biometric approval)
+│       └── lib/main.dart
+├── scripts/
+│   ├── seed.ts                      # Demo data seeder (5 wallets + 1 fraud ring)
+│   └── scenarios/s1.ts - s6.ts      # Scripted demo scenarios (PRD S1-S6)
+├── automation/n8n/workflows/        # n8n workflows (OTP step-up, admin alerts)
+├── docker-compose.yml               # Single-command full-stack orchestration
+├── .env.example                     # Environment variable template
+├── .gitignore
+└── README.md
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
+- Docker and Docker Compose
 - Node.js (LTS)
 - Python 3.10+
 - MetaMask (or compatible wallet extension) for local testing
@@ -632,43 +664,52 @@ Response:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<org>/<repo>.git
-cd <repo>
+git clone https://github.com/abhinandbs12/ai-augmented-decentralized-authentication-system.git
+cd ai-augmented-decentralized-authentication-system
 
-# 2. Build all service images
-docker-compose build
-
-# 3. Start a local Hardhat chain and deploy the contract
-npx hardhat node
-npx hardhat run scripts/deploy.js --network localhost
-
-# 4. Configure environment variables
+# 2. Configure environment variables
 cp .env.example .env
-# fill in: contract address, Supabase keys, MongoDB URI, Twilio credentials, n8n webhook URL
+# Fill in: contract address, Supabase keys, MongoDB URI, Twilio credentials
 
-# 5. Start the full stack
-docker-compose up
+# 3. Build and start all services
+docker compose build
+docker compose up
 
-# 6. Run smoke tests (registration, login, OTP, Merkle-proof endpoints)
-npm run smoke-test
+# 4. In a separate terminal, start the local Hardhat chain and deploy
+cd contracts
+npx hardhat node
+npx hardhat run scripts/deploy.ts --network localhost
+
+# 5. Seed demo data
+npx ts-node scripts/seed.ts
+
+# 6. Run the risk engine test suite
+cd services/risk-engine
+python -m pytest tests/ -v
 
 # 7. Open the dashboard
 # http://localhost:3000
 ```
 
-> An optional secondary deployment to a public testnet is supported for demonstrating real network/gas behavior.
+### Running the Risk Engine Independently
+
+```bash
+cd services/risk-engine
+pip install -r requirements.txt
+python -m pytest tests/ -v          # 50 tests, all passing
+uvicorn app.main:app --port 8001    # Requires MongoDB running
+```
 
 ---
 
-## 🧪 Testing
+## Testing
 
 | Level | Description |
 |-------|-------------|
-| **Unit** | Token bucket refill logic, LRU eviction order, Merkle tree construction/proofs, isolated contract functions |
-| **Integration** | Login flow across orchestrator → AI engine → blockchain client; OTP webhook → n8n → Twilio |
+| **Unit** | Token bucket refill logic, LRU eviction order, Merkle tree construction/proofs, isolated contract functions, risk scorer penalties, BFS distance computation, feature extraction |
+| **Integration** | Login flow across orchestrator to AI engine to blockchain client; OTP webhook to n8n to Twilio |
 | **System / E2E** | Full login flow across all three Trust Score paths against the running Docker Compose stack |
 | **Security** | Replay attack attempts, rate-limit bypass attempts, simulated credential-stuffing bursts |
-| **Usability** | Informal walkthroughs validating login/OTP flows feel fast and understandable |
 
 ### Sample Test Cases
 
@@ -682,9 +723,17 @@ npm run smoke-test
 | TC-06 | Request a Merkle proof for a known past event | Proof returned and verifies against the on-chain root |
 | TC-07 | Tamper with a stored event, then re-verify its proof | Verification fails, proving tamper detection works |
 
+### Risk Engine Test Suite (50 Tests)
+
+| Test File | Count | Coverage |
+|-----------|-------|----------|
+| `test_rules.py` | 19 | All penalty combinations, clamping at 0/100, score bands, result types |
+| `test_graph.py` | 16 | BFS at distances 1-4, graph operations, fraud ring patterns |
+| `test_features.py` | 15 | Device recognition, region matching, off-hours detection, login velocity |
+
 ---
 
-## 🔒 Security Considerations
+## Security Considerations
 
 | Threat | Mitigation |
 |--------|-----------|
@@ -704,7 +753,7 @@ npm run smoke-test
 
 ---
 
-## 📈 Success Metrics / KPIs
+## Success Metrics and KPIs
 
 | Metric | Target |
 |--------|--------|
@@ -717,18 +766,18 @@ npm run smoke-test
 
 ---
 
-## 🗺️ Roadmap / Future Enhancements
+## Roadmap and Future Enhancements
 
-- 🔐 **Zero-Knowledge Proof identity verification** (via Circom / snarkjs) — selective disclosure such as "I am over 18" without revealing underlying data
-- 🤖 Trained **Isolation Forest** / supervised model replacing the rule-based Trust Score baseline
-- ⛓️ **Multi-chain support** for registration across more than one blockchain network
-- 🏢 **Enterprise SSO federation** (SAML / OIDC bridge)
-- 🛡️ Formal third-party smart contract security audit
-- ⌨️ Expanded behavioral biometrics (typing rhythm, mouse movement) as additional risk features
+- **Zero-Knowledge Proof identity verification** (via Circom / snarkjs) — selective disclosure such as "I am over 18" without revealing underlying data
+- Trained **Isolation Forest** / supervised model replacing the rule-based Trust Score baseline
+- **Multi-chain support** for registration across more than one blockchain network
+- **Enterprise SSO federation** (SAML / OIDC bridge)
+- Formal third-party smart contract security audit
+- Expanded behavioral biometrics (typing rhythm, mouse movement) as additional risk features
 
 ---
 
-## ⚖️ Competitive / Alternative Approaches
+## Competitive and Alternative Approaches
 
 | Approach | Limitation | How This System Differs |
 |----------|-----------|--------------------------|
@@ -742,29 +791,17 @@ npm run smoke-test
 
 ---
 
-## 👥 Team
+## Team
 
 | Member | Roll Number |
 |--------|--------------|
-| **Karthik R Nair** | 20231CSE0041 | 
-| **Sunny Singh** | 20231CSE0095 | 
-| **Abhinand Baiju Smitha** | 20231CSE0146 | 
-
-
----
-
-## 📎 Companion Artifacts
-
-| Artifact | Description |
-|----------|--------------|
-| `architecture-diagram.svg` | Full detailed system architecture and data-flow diagram |
-| `gantt-chart.svg` | Full 16-week project Gantt chart with phases, tasks, and milestones |
-| `project-presentation.pptx` | Faculty presentation deck |
-| `project-explained-simply.pdf` | Plain-language explainer for non-technical readers |
+| **Karthik R Nair** | 20231CSE0041 |
+| **Sunny Singh** | 20231CSE0095 |
+| **Abhinand Baiju Smitha** | 20231CSE0146 |
 
 ---
 
-## 📚 References
+## References
 
 - Ethereum Foundation — Solidity Documentation
 - OWASP — Authentication Cheat Sheet
@@ -773,14 +810,14 @@ npm run smoke-test
 
 ---
 
-## 📄 License
+## License
 
-This project is an academic submission for the Final Year Project, Department of Computer Science & Engineering. See [`LICENSE`](LICENSE) for reuse terms (MIT recommended for code components).
+This project is an academic submission for the Final Year Project, Department of Computer Science and Engineering. See [`LICENSE`](LICENSE) for reuse terms (MIT recommended for code components).
 
 ---
 
 <div align="center">
 
-**Built with ❤️ using Blockchain, AI, and Classical Computer Science**
+**Built with Blockchain, AI, and Classical Computer Science**
 
 </div>
