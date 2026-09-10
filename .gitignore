@@ -1,3 +1,13 @@
+# Project documentation (local only — not pushed to GitHub)
+docs/
+.planning/
+PRD.md
+TRD.md
+*_Task_Plan.md
+*_Getting_Started.md
+*_Branching_Strategy.md
+Phase2_Remaining_Work.md
+
 # Node.js
 node_modules/
 npm-debug.log*
