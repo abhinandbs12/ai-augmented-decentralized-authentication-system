@@ -1,117 +1,141 @@
-import type { NextFunction, Request, Response } from 'express';
-import { tokenBucketMiddleware } from '../src/middleware/tokenBucket';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTokenBucketMiddleware } from '../src/middleware/tokenBucket';
 
-// Expected values are written out here instead of imported, so the test
-// fails if the documented limits (10 requests, 1 token per 3 seconds) change.
-const RATE_LIMIT_BODY = { error: 'Too many requests, please try again shortly' };
+// Expected numbers are written out instead of derived from the options,
+// so the test fails if the limiting maths changes.
+const DEFAULT_OPTIONS = { capacity: 10, refillIntervalMs: 3000 };
+const CLIENT_IP = '203.0.113.1';
 
-interface MockResponse {
-  status: jest.Mock;
-  json: jest.Mock;
-}
-
-function sendRequest(ip: string | undefined) {
+function sendRequest(middleware: RequestHandler, ip: string | undefined) {
   const req = { ip } as Request;
-  const res: MockResponse = { status: jest.fn(), json: jest.fn() };
+  const res = {
+    locals: { requestId: 'test-request-id' },
+    status: vi.fn(),
+    json: vi.fn(),
+  };
   res.status.mockReturnValue(res);
-  const next = jest.fn();
+  const next = vi.fn();
 
-  tokenBucketMiddleware(req, res as unknown as Response, next as NextFunction);
+  middleware(req, res as unknown as Response, next as NextFunction);
 
   return { res, next };
 }
 
-function isAllowed(ip: string | undefined): boolean {
-  const { next } = sendRequest(ip);
-  return next.mock.calls.length === 1;
+function isAllowed(middleware: RequestHandler, ip: string | undefined = CLIENT_IP): boolean {
+  return sendRequest(middleware, ip).next.mock.calls.length === 1;
 }
 
-function useAllTokens(ip: string | undefined): void {
-  for (let i = 0; i < 10; i++) {
-    expect(isAllowed(ip)).toBe(true);
+function countAllowed(middleware: RequestHandler, attempts: number): number {
+  let allowed = 0;
+  for (let i = 0; i < attempts; i++) {
+    if (isAllowed(middleware)) {
+      allowed++;
+    }
   }
+  return allowed;
 }
 
-describe('tokenBucketMiddleware', () => {
+describe('createTokenBucketMiddleware', () => {
   beforeEach(() => {
     // Freeze time so a tight loop of requests earns no new tokens.
-    jest.useFakeTimers();
+    vi.useFakeTimers();
   });
 
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it('allows the first 10 requests from one IP and rejects requests 11-15 with 429', () => {
-    const ip = '203.0.113.1';
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
 
     for (let i = 0; i < 10; i++) {
-      const { res, next } = sendRequest(ip);
+      const { res, next } = sendRequest(middleware, CLIENT_IP);
       expect(next).toHaveBeenCalledTimes(1);
       expect(res.status).not.toHaveBeenCalled();
     }
 
     for (let i = 0; i < 5; i++) {
-      const { res, next } = sendRequest(ip);
+      const { res, next } = sendRequest(middleware, CLIENT_IP);
       expect(next).not.toHaveBeenCalled();
       expect(res.status).toHaveBeenCalledWith(429);
-      expect(res.json).toHaveBeenCalledWith(RATE_LIMIT_BODY);
+      expect(res.json).toHaveBeenCalledWith({
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many attempts. Please wait a moment.',
+          request_id: 'test-request-id',
+        },
+      });
     }
   });
 
   it('earns one new request every 3 seconds', () => {
-    const ip = '203.0.113.2';
-    useAllTokens(ip);
-    expect(isAllowed(ip)).toBe(false);
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
+    expect(countAllowed(middleware, 11)).toBe(10);
 
-    jest.advanceTimersByTime(1500);
-    expect(isAllowed(ip)).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(isAllowed(middleware)).toBe(false);
 
-    jest.advanceTimersByTime(1500);
-    expect(isAllowed(ip)).toBe(true);
-    expect(isAllowed(ip)).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(isAllowed(middleware)).toBe(true);
+    expect(isAllowed(middleware)).toBe(false);
   });
 
-  it('never stores more than 10 tokens, even after a long idle period', () => {
-    const ip = '203.0.113.3';
-    useAllTokens(ip);
+  it('never stores more than the capacity', () => {
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
+    expect(countAllowed(middleware, 10)).toBe(10);
 
-    // Five minutes would earn 100 tokens without the cap.
-    jest.advanceTimersByTime(5 * 60 * 1000);
+    // 45 seconds would earn 15 tokens without the cap (and is too soon for cleanup).
+    vi.advanceTimersByTime(45 * 1000);
 
-    let allowedCount = 0;
-    for (let i = 0; i < 15; i++) {
-      if (isAllowed(ip)) {
-        allowedCount++;
-      }
-    }
-    expect(allowedCount).toBe(10);
+    expect(countAllowed(middleware, 15)).toBe(10);
+  });
+
+  it('uses the configured capacity and refill interval', () => {
+    const middleware = createTokenBucketMiddleware({ capacity: 2, refillIntervalMs: 1000 });
+    expect(countAllowed(middleware, 3)).toBe(2);
+
+    vi.advanceTimersByTime(1000);
+    expect(countAllowed(middleware, 2)).toBe(1);
   });
 
   it('does not reset the bucket of a client that keeps sending requests', () => {
-    const ip = '203.0.113.4';
-    useAllTokens(ip);
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
+    expect(countAllowed(middleware, 10)).toBe(10);
 
-    // Stay active for two hours, well past the idle-bucket cleanup time,
-    // spending each token as soon as it is earned.
+    // Stay active for two hours, spending each token as soon as it is earned,
+    // while the periodic cleanup runs many times.
     for (let elapsedMs = 0; elapsedMs < 2 * 60 * 60 * 1000; elapsedMs += 3000) {
-      jest.advanceTimersByTime(3000);
-      expect(isAllowed(ip)).toBe(true);
+      vi.advanceTimersByTime(3000);
+      expect(isAllowed(middleware)).toBe(true);
     }
 
-    expect(isAllowed(ip)).toBe(false);
+    expect(isAllowed(middleware)).toBe(false);
+  });
+
+  it('does not let cleanup hand out tokens that have not been earned yet', () => {
+    // A full refill takes 1000 seconds, far longer than one cleanup cycle.
+    const middleware = createTokenBucketMiddleware({ capacity: 1000, refillIntervalMs: 1000 });
+    expect(countAllowed(middleware, 1000)).toBe(1000);
+
+    vi.advanceTimersByTime(11 * 60 * 1000);
+
+    expect(countAllowed(middleware, 1000)).toBe(660);
   });
 
   it('keeps a separate bucket for each IP address', () => {
-    useAllTokens('203.0.113.5');
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
+    expect(countAllowed(middleware, 11)).toBe(10);
 
-    expect(isAllowed('203.0.113.5')).toBe(false);
-    expect(isAllowed('203.0.113.6')).toBe(true);
+    expect(isAllowed(middleware, '203.0.113.2')).toBe(true);
   });
 
   it('still rate limits requests that have no IP address', () => {
-    useAllTokens(undefined);
+    const middleware = createTokenBucketMiddleware(DEFAULT_OPTIONS);
 
-    expect(isAllowed(undefined)).toBe(false);
+    for (let i = 0; i < 10; i++) {
+      expect(isAllowed(middleware, undefined)).toBe(true);
+    }
+    expect(isAllowed(middleware, undefined)).toBe(false);
   });
 });
