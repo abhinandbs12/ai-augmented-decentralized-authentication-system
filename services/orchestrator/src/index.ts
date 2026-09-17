@@ -1,3 +1,117 @@
-// Placeholder — Backend Orchestrator entry point
-// Owner: Sunny Singh
-// See docs/Sunny_Task_Plan.md for implementation details.
+import express from 'express';
+import { createRiskEngineClient } from './core/riskEngineClient';
+import { LRUCache } from './ds/lruCache';
+import type { CachedSession } from './core/loginStateMachine';
+
+// ---- Config from environment ----
+const PORT = parseInt(process.env.PORT ?? '3001', 10);
+const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL ?? 'http://risk-engine:8001';
+const SESSION_TTL_MS = parseInt(process.env.SESSION_TTL_MINUTES ?? '30', 10) * 60_000;
+const SESSION_CACHE_MAX = 1024;
+
+// ---- Collaborators ----
+const sessionCache = new LRUCache<string, CachedSession>(SESSION_CACHE_MAX);
+const riskEngine = createRiskEngineClient(RISK_ENGINE_URL);
+
+// ---- Express app ----
+const app = express();
+app.use(express.json());
+
+// Health check — used by gateway and docker-compose healthcheck
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', service: 'orchestrator' });
+});
+
+// POST /api/auth/register — placeholder (DB persistence is Phase 2)
+app.post('/api/auth/register', (req, res) => {
+  const { wallet_address } = req.body as { wallet_address?: string };
+  if (!wallet_address) {
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'wallet_address required' } });
+  }
+  // Phase 1: accept registrations, no on-chain tx yet (Karthik's Phase 2)
+  console.log(`[register] wallet=${wallet_address}`);
+  return res.status(201).json({ wallet_address });
+});
+
+// POST /api/auth/login — score with risk engine and return routing decision
+app.post('/api/auth/login', async (req, res) => {
+  const { wallet_address, device_fingerprint } = req.body as {
+    wallet_address?: string;
+    device_fingerprint?: string;
+  };
+
+  if (!wallet_address || !device_fingerprint) {
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'wallet_address and device_fingerprint required' } });
+  }
+
+  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim()
+    ?? req.socket.remoteAddress
+    ?? '0.0.0.0';
+
+  try {
+    const { trustScore, reasons } = await riskEngine.score({
+      walletAddress: wallet_address,
+      ipAddress: ip,
+      deviceFingerprint: device_fingerprint,
+      timestamp: new Date(),
+    });
+
+    const decision =
+      trustScore >= 90 ? 'CHALLENGE_ISSUED'
+      : trustScore >= 50 ? 'OTP_PENDING'
+      : 'BLOCKED';
+
+    console.log(`[login] wallet=${wallet_address} score=${trustScore} decision=${decision}`);
+
+    // Report completed blocked events back to risk engine for history tracking
+    if (decision === 'BLOCKED') {
+      fetch(`${RISK_ENGINE_URL}/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wallet_address,
+          ip_address: ip,
+          device_fingerprint,
+          trust_score: trustScore,
+          decision: 'blocked',
+          timestamp: new Date().toISOString(),
+        }),
+      }).catch(() => {}); // fire-and-forget
+    }
+
+    return res.json({ state: decision, trustScore, reasons });
+  } catch (err) {
+    console.error('[login] risk engine error:', err);
+    // NFR-10: fail to OTP step-up, never open
+    return res.json({ state: 'OTP_PENDING', trustScore: 70, reasons: [] });
+  }
+});
+
+// POST /api/auth/nonce — placeholder for Phase 2 signature flow
+app.post('/api/auth/nonce', (req, res) => {
+  const { wallet_address } = req.body as { wallet_address?: string };
+  if (!wallet_address) {
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'wallet_address required' } });
+  }
+  // Phase 2: Karthik's on-chain nonce
+  const nonce = require('crypto').randomBytes(32).toString('hex');
+  return res.json({ wallet_address, nonce });
+});
+
+// POST /api/auth/verify — placeholder for Phase 2 signature verification
+app.post('/api/auth/verify', (_req, res) => {
+  return res.status(501).json({ error: { code: 'NOT_IMPLEMENTED', message: 'Signature verification is Phase 2 (Karthik)' } });
+});
+
+// POST /api/auth/otp/verify — placeholder for Phase 2
+app.post('/api/auth/otp/verify', (_req, res) => {
+  return res.status(501).json({ error: { code: 'NOT_IMPLEMENTED', message: 'OTP verification is Phase 2' } });
+});
+
+app.listen(PORT, () => {
+  console.log(`Orchestrator listening on port ${PORT}`);
+  console.log(`  Risk engine: ${RISK_ENGINE_URL}`);
+  console.log(`  Session TTL: ${SESSION_TTL_MS / 60_000} min`);
+});
+
+export { sessionCache, riskEngine };
