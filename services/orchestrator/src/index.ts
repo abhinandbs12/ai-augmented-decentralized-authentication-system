@@ -3,6 +3,7 @@ import { createRiskEngineClient } from './core/riskEngineClient';
 import { LRUCache } from './ds/lruCache';
 import type { CachedSession } from './core/loginStateMachine';
 import { MongoClient } from 'mongodb';
+import { parseTopAttemptsLimit } from './routes/topAttemptsLimit';
 
 // ---- Config from environment ----
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
@@ -28,8 +29,12 @@ app.get('/health', (_req, res) => {
 
 // GET /api/admin/attempts/top — fetch top N riskiest attempts
 app.get('/api/admin/attempts/top', async (req, res) => {
+  const n = parseTopAttemptsLimit(req.query.n);
+  if (n === null) {
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'n must be a positive whole number' } });
+  }
+
   try {
-    const n = parseInt(req.query.n as string ?? '20', 10);
     const loginEventsCol = authDb.collection('login_events');
     const fraudFlagsCol = authDb.collection('fraud_flags');
 
