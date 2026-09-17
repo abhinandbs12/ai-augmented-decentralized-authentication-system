@@ -25,18 +25,33 @@ async function main() {
   for (let i = 0; i < TOTAL_ATTEMPTS; i++) {
     const wallet = `0xAttacker${String(i).padStart(4, "0")}aabb00112233445566`;
     try {
+      const payload = {
+        wallet,
+        ip_address: "203.0.113.50",
+        device_fingerprint: "ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11",
+        timestamp: new Date().toISOString(),
+      };
+      
       const res = await fetch(`${RISK_ENGINE_URL}/score`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      
+      await fetch(`${RISK_ENGINE_URL}/event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet,
-          ip_address: "203.0.113.50",
-          device_fingerprint: "ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11",
-          timestamp: new Date().toISOString(),
+          wallet_address: payload.wallet,
+          ip_address: payload.ip_address,
+          device_fingerprint: payload.device_fingerprint,
+          trust_score: data.trust_score,
+          decision: "blocked", // Simulate attacker failing the challenge or being blocked
+          timestamp: payload.timestamp,
         }),
       });
 
-      const data = await res.json();
       if (data.trust_score < 50) blockedCount++;
 
       if ((i + 1) % 10 === 0) {

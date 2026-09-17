@@ -1,6 +1,10 @@
-// Placeholder — React web app entry point
-// See docs/ for task plans.
+import Attempts from './pages/admin/Attempts';
+
 function App() {
-  return <div>Banking Auth System</div>;
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <Attempts />
+    </div>
+  );
 }
 export default App;

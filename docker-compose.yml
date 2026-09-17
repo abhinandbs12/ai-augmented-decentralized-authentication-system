@@ -9,11 +9,7 @@ services:
     build: ./contracts
     ports:
       - "8545:8545"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8545"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+    # No healthcheck needed — Phase 2 only (Karthik's on-chain work)
 
   # --- Backend Services ---
   gateway:
@@ -43,8 +39,6 @@ services:
         condition: service_started
       risk-engine:
         condition: service_healthy
-      hardhat:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 5s
@@ -65,7 +59,7 @@ services:
       mongo:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 5s
       timeout: 5s
       retries: 10

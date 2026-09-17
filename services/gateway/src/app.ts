@@ -29,6 +29,8 @@ export function createApp(config: GatewayConfig): Express {
     createProxyMiddleware({
       target: config.orchestratorUrl,
       pathFilter: '/api',
+      proxyTimeout: 5000,
+      timeout: 5000,
       on: {
         proxyReq: prepareOrchestratorRequest,
         error: handleOrchestratorError,
@@ -54,10 +56,19 @@ function prepareOrchestratorRequest(proxyReq: ClientRequest, req: IncomingMessag
     proxyReq.removeHeader('X-Forwarded-For');
   }
 
-  // express.json() already read the body stream on validated routes, so write it back out.
-  fixRequestBody(proxyReq, req);
+  const expressReq = req as unknown as express.Request;
+  console.log('--- PROXY REQ ---', {
+    hasBody: !!expressReq.body,
+    readableLength: req.readableLength,
+    readableEnded: req.readableEnded,
+  });
+  if (expressReq.body && Object.keys(expressReq.body).length > 0) {
+    const bodyData = JSON.stringify(expressReq.body);
+    proxyReq.setHeader('Content-Type', 'application/json');
+    proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+    proxyReq.write(bodyData);
+  }
 }
-
 function handleOrchestratorError(
   error: Error,
   req: IncomingMessage,
@@ -80,6 +91,7 @@ const handleUnexpectedError: ErrorRequestHandler = (error: unknown, req, res, ne
   // express.json() marks malformed, oversized or wrongly encoded bodies with a 4xx status.
   const status = (error as { status?: unknown } | null)?.status;
   if (typeof status === 'number' && status >= 400 && status < 500) {
+    console.error(`Client error [${res.locals.requestId}]:`, error);
     sendError(res, 'INVALID_REQUEST');
     return;
   }

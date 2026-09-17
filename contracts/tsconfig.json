@@ -8,5 +8,9 @@
     "resolveJsonModule": true
   },
   "include": ["./scripts", "./test"],
-  "files": ["./hardhat.config.ts"]
+  "files": ["./hardhat.config.ts"],
+  "ts-node": {
+    "transpileOnly": true,
+    "files": true
+  }
 }

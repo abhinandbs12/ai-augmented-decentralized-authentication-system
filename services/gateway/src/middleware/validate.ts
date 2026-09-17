@@ -46,6 +46,7 @@ function validateBody(schema: z.ZodType) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
+      console.error(`Validation failed for ${req.path}:`, result.error.format());
       sendError(res, 'INVALID_REQUEST');
       return;
     }

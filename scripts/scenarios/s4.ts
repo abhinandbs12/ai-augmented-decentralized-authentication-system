@@ -25,14 +25,29 @@ async function main() {
   console.log("  Step 1: Generating login events from all mule wallets...");
   for (const wallet of MULE_WALLETS) {
     for (let i = 0; i < 4; i++) {
-      await fetch(`${RISK_ENGINE_URL}/score`, {
+      const payload = {
+        wallet,
+        ip_address: SHARED_IP,
+        device_fingerprint: SHARED_DEVICE,
+        timestamp: new Date().toISOString(),
+      };
+      const res = await fetch(`${RISK_ENGINE_URL}/score`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      
+      await fetch(`${RISK_ENGINE_URL}/event`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          wallet,
-          ip_address: SHARED_IP,
-          device_fingerprint: SHARED_DEVICE,
-          timestamp: new Date().toISOString(),
+          wallet_address: payload.wallet,
+          ip_address: payload.ip_address,
+          device_fingerprint: payload.device_fingerprint,
+          trust_score: data.trust_score,
+          decision: "blocked", // Simulate attacker failing the challenge or being blocked
+          timestamp: payload.timestamp,
         }),
       });
     }
