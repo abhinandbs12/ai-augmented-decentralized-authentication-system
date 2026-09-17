@@ -2,16 +2,20 @@ import express from 'express';
 import { createRiskEngineClient } from './core/riskEngineClient';
 import { LRUCache } from './ds/lruCache';
 import type { CachedSession } from './core/loginStateMachine';
+import { MongoClient } from 'mongodb';
 
 // ---- Config from environment ----
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL ?? 'http://risk-engine:8001';
 const SESSION_TTL_MS = parseInt(process.env.SESSION_TTL_MINUTES ?? '30', 10) * 60_000;
 const SESSION_CACHE_MAX = 1024;
+const MONGO_URL = process.env.MONGO_URL ?? 'mongodb://mongo:27017';
 
 // ---- Collaborators ----
 const sessionCache = new LRUCache<string, CachedSession>(SESSION_CACHE_MAX);
 const riskEngine = createRiskEngineClient(RISK_ENGINE_URL);
+const mongoClient = new MongoClient(MONGO_URL);
+const authDb = mongoClient.db('authdb');
 
 // ---- Express app ----
 const app = express();
@@ -20,6 +24,44 @@ app.use(express.json());
 // Health check — used by gateway and docker-compose healthcheck
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'orchestrator' });
+});
+
+// GET /api/admin/attempts/top — fetch top N riskiest attempts
+app.get('/api/admin/attempts/top', async (req, res) => {
+  try {
+    const n = parseInt(req.query.n as string ?? '20', 10);
+    const loginEventsCol = authDb.collection('login_events');
+    const fraudFlagsCol = authDb.collection('fraud_flags');
+
+    // Get attempts sorted by trust_score ascending (riskiest first)
+    const attempts = await loginEventsCol
+      .find({})
+      .sort({ trust_score: 1, timestamp: -1 })
+      .limit(n)
+      .toArray();
+
+    // Attach cluster_id if wallet is flagged
+    const result = await Promise.all(
+      attempts.map(async (attempt) => {
+        const flag = await fraudFlagsCol.findOne({ node_ids: attempt.wallet_address });
+        return {
+          event_id: attempt.event_id || attempt._id.toString(),
+          wallet_address: attempt.wallet_address,
+          ip_address: attempt.ip_address,
+          device_fingerprint: attempt.device_fingerprint,
+          trust_score: attempt.trust_score,
+          decision: attempt.decision,
+          timestamp: attempt.timestamp,
+          cluster_id: flag ? flag.cluster_id : undefined,
+        };
+      })
+    );
+
+    return res.json({ attempts: result });
+  } catch (err) {
+    console.error('[admin] failed to fetch top attempts:', err);
+    return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch attempts' } });
+  }
 });
 
 // POST /api/auth/register — placeholder (DB persistence is Phase 2)
@@ -108,7 +150,13 @@ app.post('/api/auth/otp/verify', (_req, res) => {
   return res.status(501).json({ error: { code: 'NOT_IMPLEMENTED', message: 'OTP verification is Phase 2' } });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
+  try {
+    await mongoClient.connect();
+    console.log(`Connected to MongoDB at ${MONGO_URL}`);
+  } catch (err) {
+    console.error('Failed to connect to MongoDB:', err);
+  }
   console.log(`Orchestrator listening on port ${PORT}`);
   console.log(`  Risk engine: ${RISK_ENGINE_URL}`);
   console.log(`  Session TTL: ${SESSION_TTL_MS / 60_000} min`);
