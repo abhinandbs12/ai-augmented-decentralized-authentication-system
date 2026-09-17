@@ -10,13 +10,13 @@
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
 const MULE_WALLETS = [
-  "0xMule01aabbccdd11223344556677889900aabbcc",
-  "0xMule02aabbccdd11223344556677889900aabbcc",
-  "0xMule03aabbccdd11223344556677889900aabbcc",
+  "0xF6a7B8c9D0e1f2A3b4C5d6E7f8A9b0C1d2E3f4A5",
+  "0xa7B8c9D0e1F2a3B4c5D6e7F8a9B0c1D2e3F4a5B6",
+  "0xB8c9D0e1f2A3b4C5d6E7f8A9b0C1d2E3f4A5b6C7",
 ];
 
 const SHARED_IP = "203.0.113.99";
-const SHARED_DEVICE = "device_FRAUD_shared_fingerprint";
+const SHARED_DEVICE = "ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00";
 
 async function main() {
   console.log("━━━ S4: Fraud ring detection ━━━\n");

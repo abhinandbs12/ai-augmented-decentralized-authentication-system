@@ -15,9 +15,9 @@ async function main() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      wallet: "0xCust01aabbccdd11223344556677889900aabbcc",
+      wallet: "0xA1b2C3d4E5f6a7B8c9D0e1F2a3B4c5D6e7F8a9B0",
       ip_address: "192.168.1.100",
-      device_fingerprint: "device_NEW_phone_never_seen_before",
+      device_fingerprint: "aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44ee55ff66aa11bb22cc33dd44",
       timestamp: new Date().toISOString(),
     }),
   });

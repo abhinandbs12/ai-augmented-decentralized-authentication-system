@@ -155,28 +155,71 @@ async def score(context: LoginContext):
         graph_distance=graph_distance,
     )
 
-    # --- 5. Log the event into MongoDB for future feature lookups ---
-    login_events.insert_one({
-        "wallet_address": context.wallet,
-        "ip_address": context.ip_address,
-        "device_fingerprint": context.device_fingerprint,
-        "trust_score": result.trust_score,
-        "decision": _decision_from_score(result.trust_score),
-        "factors": [{"name": r, "penalty": 0} for r in result.reasons],
-        "timestamp": context.timestamp,
-        "region": region,
-    })
-
-    # --- 6. Auto-flag bad actors (TRD §9.5) ---
-    # A node becomes flagged when it is involved in 3+ blocked attempts within 1 hour
-    if result.trust_score < 50:
-        _check_auto_flag(context.wallet, login_events, db.get_collection("fraud_flags"))
+    # NOTE: The risk engine does NOT write to login_events here.
+    # The orchestrator writes the event after the login flow completes,
+    # then calls POST /event to keep the risk engine's history in sync.
+    # This avoids double-counting velocity and the retry-skips-OTP bug
+    # (see Sunny's PR #4 coordination notes).
 
     logger.info(
         "Scored wallet=%s score=%d reasons=%s",
         context.wallet[:10], result.trust_score, result.reasons,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# POST /event — called by the orchestrator after a login flow completes
+# ---------------------------------------------------------------------------
+
+class LoginEvent(BaseModel):
+    """Event reported by the orchestrator after a login decision is finalized."""
+    wallet_address: str = Field(..., description="Wallet address")
+    ip_address: str = Field(..., description="Source IP address")
+    device_fingerprint: str = Field(..., description="SHA-256 device fingerprint")
+    trust_score: int = Field(..., ge=0, le=100, description="Trust Score assigned")
+    decision: str = Field(..., description="Final decision: allow, otp_required, blocked")
+    timestamp: datetime = Field(..., description="Timestamp of the login attempt")
+    event_id: str | None = Field(None, description="Event ID for Merkle batching")
+
+
+@app.post("/event")
+async def record_event(event: LoginEvent):
+    """
+    Record a completed login event into MongoDB.
+
+    Called by the orchestrator AFTER the login flow finishes (signature verified,
+    OTP completed, or attempt blocked). This keeps login_events in sync for
+    future feature extraction without the risk engine writing during scoring.
+    """
+    if db is None or threat_graph is None:
+        raise HTTPException(status_code=503, detail="Risk engine not initialized")
+
+    login_events = db.get_collection("login_events")
+    region = lookup_region(event.ip_address)
+
+    login_events.insert_one({
+        "wallet_address": event.wallet_address,
+        "ip_address": event.ip_address,
+        "device_fingerprint": event.device_fingerprint,
+        "trust_score": event.trust_score,
+        "decision": event.decision,
+        "timestamp": event.timestamp,
+        "region": region,
+        "event_id": event.event_id,
+    })
+
+    # Auto-flag bad actors (TRD §9.5)
+    if event.decision == "blocked":
+        _check_auto_flag(
+            event.wallet_address, login_events, db.get_collection("fraud_flags")
+        )
+
+    logger.info(
+        "Recorded event wallet=%s decision=%s score=%d",
+        event.wallet_address[:10], event.decision, event.trust_score,
+    )
+    return {"status": "recorded"}
 
 
 def _decision_from_score(score: int) -> str:
@@ -219,3 +262,4 @@ def _check_auto_flag(
                 "detected_at": datetime.now(timezone.utc),
             })
             logger.warning("Auto-flagged wallet %s as bad actor", wallet[:10])
+

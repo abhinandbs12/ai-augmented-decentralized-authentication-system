@@ -16,9 +16,9 @@ async function main() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        wallet: "0xCust02aabbccdd11223344556677889900aabbcc",
+        wallet: "0xB2c3D4e5F6a7b8C9d0E1f2A3b4C5d6E7f8A9b0C1",
         ip_address: "203.0.113.50",  // Unknown foreign IP (Nigeria per geo overrides)
-        device_fingerprint: "device_STOLEN_attacker_machine",
+        device_fingerprint: "dd00ee11ff22aa33bb44cc55dd66ee77ff88aa99bb00cc11dd22ee33ff44aa55",
         timestamp: new Date().toISOString(),
       }),
     });
@@ -29,9 +29,9 @@ async function main() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      wallet: "0xCust02aabbccdd11223344556677889900aabbcc",
+      wallet: "0xB2c3D4e5F6a7b8C9d0E1f2A3b4C5d6E7f8A9b0C1",
       ip_address: "203.0.113.50",
-      device_fingerprint: "device_STOLEN_attacker_machine",
+      device_fingerprint: "dd00ee11ff22aa33bb44cc55dd66ee77ff88aa99bb00cc11dd22ee33ff44aa55",
       timestamp: new Date().toISOString(),
     }),
   });

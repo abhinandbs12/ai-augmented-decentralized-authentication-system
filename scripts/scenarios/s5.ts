@@ -31,7 +31,7 @@ async function main() {
         body: JSON.stringify({
           wallet,
           ip_address: "203.0.113.50",
-          device_fingerprint: "device_botnet_shared",
+          device_fingerprint: "ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11",
           timestamp: new Date().toISOString(),
         }),
       });
