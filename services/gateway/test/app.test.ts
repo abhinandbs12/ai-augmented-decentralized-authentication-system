@@ -1,5 +1,7 @@
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
+import { once } from 'node:events';
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { inspect } from 'node:util';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
@@ -140,6 +142,35 @@ describe('proxying to the orchestrator', () => {
     expect(receivedRequests[0].headers['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
   });
 
+  it('forwards a JSON body that the client sent in chunks', async () => {
+    const gateway = createGateway().listen(0, '127.0.0.1');
+    await once(gateway, 'listening');
+    const body = JSON.stringify({ wallet_address: WALLET, device_fingerprint: FINGERPRINT });
+
+    const status = await new Promise<number>((resolve, reject) => {
+      const clientRequest = httpRequest(
+        {
+          host: '127.0.0.1',
+          port: (gateway.address() as AddressInfo).port,
+          path: '/api/auth/login',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Transfer-Encoding': 'chunked' },
+        },
+        (response) => {
+          response.resume();
+          response.on('end', () => resolve(response.statusCode ?? 0));
+        },
+      );
+      clientRequest.on('error', reject);
+      clientRequest.write(body.slice(0, 20));
+      clientRequest.end(body.slice(20));
+    });
+    await close(gateway);
+
+    expect(status).toBe(200);
+    expect(JSON.parse(receivedRequests[0].body)).toEqual(JSON.parse(body));
+  });
+
   it('passes routes without a body schema through untouched', async () => {
     const gateway = createGateway();
 
@@ -209,6 +240,24 @@ describe('request validation', () => {
 
     expectErrorBody(response, 400, 'INVALID_REQUEST');
     expect(receivedRequests).toHaveLength(0);
+  });
+
+  it('does not write the raw request body to the logs when JSON is malformed', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await request(createGateway())
+      .post('/api/auth/otp/verify')
+      .set('Content-Type', 'application/json')
+      .send(`{"otp_challenge_id": "${OTP_CHALLENGE_ID}", "code": "482913",}`);
+
+    const logged = consoleError.mock.calls
+      .flat()
+      .map((value) => (typeof value === 'string' ? value : inspect(value)))
+      .join('\n');
+    consoleError.mockRestore();
+
+    expectErrorBody(response, 400, 'INVALID_REQUEST');
+    expect(logged).not.toContain('482913');
   });
 
   it('rejects malformed JSON', async () => {

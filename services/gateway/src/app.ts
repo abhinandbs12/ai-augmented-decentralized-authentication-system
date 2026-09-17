@@ -2,7 +2,7 @@ import type { ClientRequest, IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import express, { type ErrorRequestHandler, type Express, type Response } from 'express';
 import helmet from 'helmet';
-import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import type { GatewayConfig } from './config';
 import { sendError } from './errors';
 import { requestIdMiddleware } from './middleware/requestId';
@@ -56,19 +56,19 @@ function prepareOrchestratorRequest(proxyReq: ClientRequest, req: IncomingMessag
     proxyReq.removeHeader('X-Forwarded-For');
   }
 
+  // express.json() already read the body stream on validated routes, so write it back out.
   const expressReq = req as unknown as express.Request;
-  console.log('--- PROXY REQ ---', {
-    hasBody: !!expressReq.body,
-    readableLength: req.readableLength,
-    readableEnded: req.readableEnded,
-  });
   if (expressReq.body && Object.keys(expressReq.body).length > 0) {
     const bodyData = JSON.stringify(expressReq.body);
+    // The body now has a known length. Sending Transfer-Encoding and Content-Length
+    // together makes Node's HTTP parser reject the request with 400.
+    proxyReq.removeHeader('Transfer-Encoding');
     proxyReq.setHeader('Content-Type', 'application/json');
     proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
     proxyReq.write(bodyData);
   }
 }
+
 function handleOrchestratorError(
   error: Error,
   req: IncomingMessage,
@@ -91,7 +91,10 @@ const handleUnexpectedError: ErrorRequestHandler = (error: unknown, req, res, ne
   // express.json() marks malformed, oversized or wrongly encoded bodies with a 4xx status.
   const status = (error as { status?: unknown } | null)?.status;
   if (typeof status === 'number' && status >= 400 && status < 500) {
-    console.error(`Client error [${res.locals.requestId}]:`, error);
+    // Log only the error type: body-parser attaches the raw request body (which can hold
+    // an OTP code or a signature) to the error object.
+    const errorType = (error as { type?: unknown }).type ?? status;
+    console.error(`Rejected request body [${res.locals.requestId}]: ${String(errorType)}`);
     sendError(res, 'INVALID_REQUEST');
     return;
   }
