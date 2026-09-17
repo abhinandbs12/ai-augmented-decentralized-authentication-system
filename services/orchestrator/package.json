@@ -4,7 +4,15 @@
   "private": true,
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js"
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
   }
 }
