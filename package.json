@@ -11,7 +11,8 @@
     "s4": "ts-node scripts/scenarios/s4.ts",
     "s5": "ts-node scripts/scenarios/s5.ts",
     "s6": "ts-node scripts/scenarios/s6.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "trust-device": "ts-node scripts/trustDevice.ts"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
