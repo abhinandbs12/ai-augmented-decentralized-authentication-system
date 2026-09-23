@@ -34,8 +34,16 @@ async function main() {
       console.log("  ⚠️  No events found. Run seed.ts first.");
       return;
     }
-    eventId = events[0].event_id || events[0]._id;
-    console.log(`    Found event: ${eventId}`);
+
+    // Only an anchored event has a proof: batches are flushed every 16 events
+    // or every 60 seconds.
+    const anchored = events.find((event: any) => event.batch_id !== null);
+    if (!anchored) {
+      console.log("  ⚠️  No event has been anchored yet. Complete a login and wait a minute.");
+      return;
+    }
+    eventId = anchored.event_id;
+    console.log(`    Found event: ${eventId} (batch ${anchored.batch_id})`);
   } catch (e: any) {
     console.log(`  ⚠️  Could not fetch events: ${e.message}`);
     console.log("     Orchestrator may not be running.");

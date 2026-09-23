@@ -5,6 +5,10 @@
  * Ref: PRD §3.3, scenario S1
  */
 
+import { NORMAL_WALLETS } from "../demoData";
+
+const CUSTOMER = NORMAL_WALLETS[0];
+
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
 async function main() {
@@ -15,9 +19,9 @@ async function main() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      wallet: "0xA1b2C3d4E5f6a7B8c9D0e1F2a3B4c5D6e7F8a9B0",
-      ip_address: "192.168.1.100",
-      device_fingerprint: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
+      wallet: CUSTOMER.wallet,
+      ip_address: CUSTOMER.ip,
+      device_fingerprint: CUSTOMER.device,
       timestamp: new Date().toISOString(),
     }),
   });
