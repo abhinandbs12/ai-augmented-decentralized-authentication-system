@@ -32,8 +32,10 @@ export interface LoginDependencies {
   // Keyed by session token (TRD §11.3).
   sessionCache: LRUCache<string, CachedSession>;
   riskEngine: RiskEngine;
-  issueNonce(walletAddress: string): Promise<IssuedNonce>;
-  startOtpChallenge(walletAddress: string): Promise<string>;
+  // The score is passed on, because the challenge belongs to a scored attempt
+  // and the event written after verification has to report that same score.
+  issueNonce(walletAddress: string, trustScore: number): Promise<IssuedNonce>;
+  startOtpChallenge(walletAddress: string, trustScore: number): Promise<string>;
 }
 
 export type LoginResult =
@@ -55,12 +57,12 @@ export async function handleLogin(
   const { trustScore, reasons } = await scoreLogin(request, deps.riskEngine);
 
   if (trustScore >= ALLOW_MIN_SCORE) {
-    const nonce = await deps.issueNonce(request.walletAddress);
+    const nonce = await deps.issueNonce(request.walletAddress, trustScore);
     return { state: 'CHALLENGE_ISSUED', trustScore, reasons, nonce };
   }
 
   if (trustScore >= OTP_MIN_SCORE) {
-    const otpChallengeId = await deps.startOtpChallenge(request.walletAddress);
+    const otpChallengeId = await deps.startOtpChallenge(request.walletAddress, trustScore);
     return { state: 'OTP_PENDING', trustScore, reasons, otpChallengeId };
   }
 

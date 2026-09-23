@@ -53,6 +53,19 @@ export class LRUCache<K, V> {
     }
   }
 
+  // Logout has to remove a session from the cache immediately, not wait for it
+  // to age out: a revoked token must stop working on the next request.
+  delete(key: K): boolean {
+    const node = this.nodes.get(key);
+    if (node === undefined) {
+      return false;
+    }
+
+    this.unlink(node);
+    this.nodes.delete(key);
+    return true;
+  }
+
   private moveToFront(node: CacheNode<K, V>): void {
     if (node === this.head) {
       return;
