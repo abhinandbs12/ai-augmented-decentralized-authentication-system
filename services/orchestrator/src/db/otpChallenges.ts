@@ -6,6 +6,7 @@ export interface OtpChallenge {
   codeHash: string;
   trustScore: number;
   deviceFingerprint: string;
+  factors: string[];
   attempts: number;
   verified: boolean;
   expired: boolean;
@@ -18,18 +19,20 @@ export async function insertOtpChallenge(
     codeHash: string;
     trustScore: number;
     deviceFingerprint: string;
+    factors: string[];
     expiresAt: Date;
   },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO otp_challenges (wallet_address, code_hash, trust_score, device_fingerprint, expires_at)
-     VALUES (lower($1), $2, $3, $4, $5)
+    `INSERT INTO otp_challenges (wallet_address, code_hash, trust_score, device_fingerprint, factors, expires_at)
+     VALUES (lower($1), $2, $3, $4, $5, $6)
      RETURNING id`,
     [
       challenge.walletAddress,
       challenge.codeHash,
       challenge.trustScore,
       challenge.deviceFingerprint,
+      challenge.factors,
       challenge.expiresAt,
     ],
   );
@@ -44,11 +47,12 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     code_hash: string;
     trust_score: number;
     device_fingerprint: string;
+    factors: string[];
     attempts: number;
     verified: boolean;
     expired: boolean;
   }>(
-    `SELECT id, wallet_address, code_hash, trust_score, device_fingerprint, attempts, verified,
+    `SELECT id, wallet_address, code_hash, trust_score, device_fingerprint, factors, attempts, verified,
             expires_at <= now() AS expired
      FROM otp_challenges WHERE id = $1`,
     [id],
@@ -65,6 +69,7 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     codeHash: row.code_hash,
     trustScore: row.trust_score,
     deviceFingerprint: row.device_fingerprint,
+    factors: row.factors,
     attempts: row.attempts,
     verified: row.verified,
     expired: row.expired,

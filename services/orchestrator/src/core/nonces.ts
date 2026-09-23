@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
-import { consumeNonce, insertNonce, type NonceConsumption } from '../db/nonces';
+import { consumeNonce, insertNonce, type AttemptContext, type NonceConsumption } from '../db/nonces';
 import type { IssuedNonce } from './loginStateMachine';
 
 // 32 random bytes, hex encoded, valid for five minutes (TRD §11.2): long enough
@@ -11,16 +11,10 @@ export class NonceService {
     private readonly ttlMs: number,
   ) {}
 
-  async issue(walletAddress: string, trustScore: number, deviceFingerprint: string): Promise<IssuedNonce> {
+  async issue(walletAddress: string, context: AttemptContext): Promise<IssuedNonce> {
     const nonce = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + this.ttlMs);
-    const challengeId = await insertNonce(this.pool, {
-      walletAddress,
-      value: nonce,
-      trustScore,
-      deviceFingerprint,
-      expiresAt,
-    });
+    const challengeId = await insertNonce(this.pool, { walletAddress, value: nonce, expiresAt, ...context });
 
     return { challengeId, nonce, expiresAt };
   }

@@ -19,9 +19,9 @@ import { OtpService } from '../src/otp/otpService';
 // ---- In-memory stand-ins for the four tables the routes touch -------------
 const tables = vi.hoisted(() => ({
   users: new Map<string, { id: string; walletAddress: string; displayName: string | null; phoneNumber: string | null }>(),
-  nonces: new Map<string, { id: string; wallet: string; value: string; trustScore: number; used: boolean; expired: boolean }>(),
+  nonces: new Map<string, { id: string; wallet: string; value: string; context: Record<string, unknown>; used: boolean; expired: boolean }>(),
   sessions: new Map<string, { walletAddress: string; userId: string; expiresAt: Date; revoked: boolean }>(),
-  otp: new Map<string, { id: string; walletAddress: string; codeHash: string; trustScore: number; attempts: number; verified: boolean; expired: boolean }>(),
+  otp: new Map<string, { id: string; walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string; factors: string[]; attempts: number; verified: boolean; expired: boolean }>(),
 }));
 
 vi.mock('../src/db/users', () => ({
@@ -47,14 +47,14 @@ vi.mock('../src/db/users', () => ({
 vi.mock('../src/db/nonces', () => ({
   insertNonce: async (
     _pool: Pool,
-    nonce: { walletAddress: string; value: string; trustScore: number },
+    { walletAddress, value, expiresAt: _expiresAt, ...context }: { walletAddress: string; value: string; expiresAt: Date },
   ) => {
     const id = randomUUID();
-    tables.nonces.set(`${nonce.walletAddress.toLowerCase()}:${nonce.value}`, {
+    tables.nonces.set(`${walletAddress.toLowerCase()}:${value}`, {
       id,
-      wallet: nonce.walletAddress.toLowerCase(),
-      value: nonce.value,
-      trustScore: nonce.trustScore,
+      wallet: walletAddress.toLowerCase(),
+      value,
+      context,
       used: false,
       expired: false,
     });
@@ -72,7 +72,7 @@ vi.mock('../src/db/nonces', () => ({
       return { status: 'expired' };
     }
     stored.used = true;
-    return { status: 'consumed', nonceId: stored.id, trustScore: stored.trustScore };
+    return { status: 'consumed', nonceId: stored.id, ...stored.context };
   },
 }));
 
@@ -109,7 +109,7 @@ vi.mock('../src/db/sessions', () => ({
 vi.mock('../src/db/otpChallenges', () => ({
   insertOtpChallenge: async (
     _pool: Pool,
-    challenge: { walletAddress: string; codeHash: string; trustScore: number },
+    challenge: { walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string; factors: string[] },
   ) => {
     const id = randomUUID();
     tables.otp.set(id, {
@@ -117,6 +117,8 @@ vi.mock('../src/db/otpChallenges', () => ({
       walletAddress: challenge.walletAddress.toLowerCase(),
       codeHash: challenge.codeHash,
       trustScore: challenge.trustScore,
+      deviceFingerprint: challenge.deviceFingerprint,
+      factors: challenge.factors,
       attempts: 0,
       verified: false,
       expired: false,
@@ -627,6 +629,30 @@ describe('orchestrator app', () => {
       expect(response.status).toBe(200);
       expect(response.body.nonce).toMatch(/^[0-9a-f]{64}$/);
       expect(response.body.trust_score).toBe(71);
+    });
+
+    it('records the completed login with the route and reasons that caused the code', async () => {
+      await registerWallet(context);
+      context.setScore(71, ['unrecognized_device']);
+      const login = await request(context.app)
+        .post('/api/auth/login')
+        .send({ wallet_address: WALLET, device_fingerprint: DEVICE });
+      const challengeId = login.body.otp_challenge_id;
+
+      const otp = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: codeFor(challengeId) });
+      await request(context.app)
+        .post('/api/auth/verify')
+        .send({ wallet_address: WALLET, nonce: otp.body.nonce, signature: SIGNATURE });
+
+      expect(context.reported.at(-1)).toMatchObject({
+        verified: true,
+        decision: 'otp_required',
+        trustScore: 71,
+        deviceFingerprint: DEVICE,
+        factors: ['unrecognized_device'],
+      });
     });
 
     it('counts a wrong code and says how many attempts remain', async () => {

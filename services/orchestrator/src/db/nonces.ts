@@ -1,26 +1,36 @@
 import type { Pool } from 'pg';
 
+// What was scored for the attempt a challenge belongs to.
+export interface AttemptContext {
+  trustScore: number;
+  deviceFingerprint: string;
+  factors: string[];
+  route: 'allow' | 'otp_required';
+}
+
 export type NonceConsumption =
-  | { status: 'consumed'; nonceId: string; trustScore: number; deviceFingerprint: string }
+  | ({ status: 'consumed'; nonceId: string } & AttemptContext)
   | { status: 'unknown' }
   | { status: 'used' }
   | { status: 'expired' };
 
 export async function insertNonce(
   pool: Pool,
-  nonce: {
-    walletAddress: string;
-    value: string;
-    trustScore: number;
-    deviceFingerprint: string;
-    expiresAt: Date;
-  },
+  nonce: { walletAddress: string; value: string; expiresAt: Date } & AttemptContext,
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO nonces (wallet_address, nonce_value, trust_score, device_fingerprint, expires_at)
-     VALUES (lower($1), $2, $3, $4, $5)
+    `INSERT INTO nonces (wallet_address, nonce_value, trust_score, device_fingerprint, factors, route, expires_at)
+     VALUES (lower($1), $2, $3, $4, $5, $6, $7)
      RETURNING id`,
-    [nonce.walletAddress, nonce.value, nonce.trustScore, nonce.deviceFingerprint, nonce.expiresAt],
+    [
+      nonce.walletAddress,
+      nonce.value,
+      nonce.trustScore,
+      nonce.deviceFingerprint,
+      nonce.factors,
+      nonce.route,
+      nonce.expiresAt,
+    ],
   );
 
   return result.rows[0].id;
@@ -33,11 +43,17 @@ export async function consumeNonce(
   walletAddress: string,
   value: string,
 ): Promise<NonceConsumption> {
-  const consumed = await pool.query<{ id: string; trust_score: number; device_fingerprint: string }>(
+  const consumed = await pool.query<{
+    id: string;
+    trust_score: number;
+    device_fingerprint: string;
+    factors: string[];
+    route: AttemptContext['route'];
+  }>(
     `UPDATE nonces SET used = true
      WHERE wallet_address = lower($1) AND nonce_value = $2
        AND used = false AND expires_at > now()
-     RETURNING id, trust_score, device_fingerprint`,
+     RETURNING id, trust_score, device_fingerprint, factors, route`,
     [walletAddress, value],
   );
 
@@ -48,6 +64,8 @@ export async function consumeNonce(
       nonceId: row.id,
       trustScore: row.trust_score,
       deviceFingerprint: row.device_fingerprint,
+      factors: row.factors,
+      route: row.route,
     };
   }
 

@@ -120,9 +120,19 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         {
           sessionCache: deps.sessionCache,
           riskEngine: deps.riskEngine,
-          issueNonce: (wallet, trustScore) => deps.nonces.issue(wallet, trustScore, deviceFingerprint),
-          startOtpChallenge: (wallet, trustScore) =>
-            deps.otp.start(wallet, user?.phoneNumber ?? null, trustScore, deviceFingerprint),
+          issueNonce: (wallet, score) =>
+            deps.nonces.issue(wallet, {
+              trustScore: score.trustScore,
+              deviceFingerprint,
+              factors: score.reasons,
+              route: 'allow',
+            }),
+          startOtpChallenge: (wallet, score) =>
+            deps.otp.start(wallet, user?.phoneNumber ?? null, {
+              trustScore: score.trustScore,
+              deviceFingerprint,
+              factors: score.reasons,
+            }),
         },
       );
 
@@ -216,8 +226,8 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         ipAddress: clientIp(req),
         deviceFingerprint: consumption.deviceFingerprint,
         trustScore: consumption.trustScore,
-        decision: 'allow',
-        factors: [],
+        decision: consumption.route,
+        factors: consumption.factors,
         timestamp: new Date(),
         verified: true,
       });
@@ -244,11 +254,12 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
       const verification = await deps.otp.verify(challengeId, code);
 
       if (verification.status === 'verified') {
-        const nonce = await deps.nonces.issue(
-          verification.walletAddress,
-          verification.trustScore,
-          verification.deviceFingerprint,
-        );
+        const nonce = await deps.nonces.issue(verification.walletAddress, {
+          trustScore: verification.trustScore,
+          deviceFingerprint: verification.deviceFingerprint,
+          factors: verification.factors,
+          route: 'otp_required',
+        });
         res.json({
           decision: 'allow',
           trust_score: verification.trustScore,
