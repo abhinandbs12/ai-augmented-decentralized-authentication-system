@@ -47,6 +47,10 @@ export function createApp(config: GatewayConfig): Express {
 }
 
 function prepareOrchestratorRequest(proxyReq: ClientRequest, req: IncomingMessage): void {
+  // The internal token is a service credential shared by the backend services.
+  // A client must never be able to present one, so it is dropped here.
+  proxyReq.removeHeader('X-Internal-Token');
+
   // Replace any client-supplied X-Forwarded-For with the real connection address,
   // so the orchestrator always scores the true client IP.
   const clientIp = req.socket.remoteAddress;

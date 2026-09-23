@@ -142,6 +142,17 @@ describe('proxying to the orchestrator', () => {
     expect(receivedRequests[0].headers['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
   });
 
+  // The orchestrator accepts the internal token as a service credential, so a
+  // client must never be able to smuggle one through the gateway.
+  it('drops a client-supplied X-Internal-Token', async () => {
+    await request(createGateway())
+      .post('/api/auth/nonce')
+      .set('X-Internal-Token', 'stolen-or-guessed')
+      .send({ wallet_address: WALLET });
+
+    expect(receivedRequests[0].headers['x-internal-token']).toBeUndefined();
+  });
+
   it('forwards a JSON body that the client sent in chunks', async () => {
     const gateway = createGateway().listen(0, '127.0.0.1');
     await once(gateway, 'listening');
