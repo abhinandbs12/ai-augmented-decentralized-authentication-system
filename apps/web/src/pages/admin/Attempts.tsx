@@ -40,7 +40,12 @@ function truncateWallet(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export default function Attempts() {
+interface AttemptsProps {
+  // Admin endpoints need a session whose wallet is on the ADMIN_WALLETS list.
+  sessionToken?: string | null;
+}
+
+export default function Attempts({ sessionToken }: AttemptsProps) {
   const [attempts, setAttempts] = useState<LoginAttempt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,13 +53,18 @@ export default function Attempts() {
 
   useEffect(() => {
     fetchAttempts();
-  }, [topN]);
+  }, [topN, sessionToken]);
 
   async function fetchAttempts() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/attempts/top?n=${topN}`);
+      const res = await fetch(`/api/admin/attempts/top?n=${topN}`, {
+        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {},
+      });
+      if (res.status === 401 || res.status === 403) {
+        throw new Error("This dashboard is for administrator wallets only.");
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setAttempts(data.attempts || []);
