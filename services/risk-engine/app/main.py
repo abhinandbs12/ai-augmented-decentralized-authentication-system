@@ -136,12 +136,14 @@ async def score(context: LoginContext):
     device_unrecognized = is_unrecognized_device(
         context.wallet, context.device_fingerprint, login_events
     )
-    region = lookup_region(context.ip_address)
     region_unrecognized = is_unrecognized_region(
         context.wallet, context.ip_address, login_events
     )
     off_hours = is_off_hours(context.wallet, context.timestamp, login_events)
-    velocity = login_velocity(context.wallet, context.ip_address, login_events)
+    velocity = login_velocity(
+        context.wallet, context.ip_address, login_events,
+        window_seconds=int(os.getenv("VELOCITY_WINDOW_SECONDS", "300")),
+    )
 
     # --- 3. Graph proximity (bounded BFS) ---
     graph_distance = threat_graph.nearest_bad_actor_distance(context.wallet)
@@ -220,16 +222,6 @@ async def record_event(event: LoginEvent):
         event.wallet_address[:10], event.decision, event.trust_score,
     )
     return {"status": "recorded"}
-
-
-def _decision_from_score(score: int) -> str:
-    """Map Trust Score to routing decision (PRD §3.2)."""
-    if score >= 90:
-        return "allow"
-    elif score >= 50:
-        return "otp_required"
-    else:
-        return "blocked"
 
 
 def _check_auto_flag(
