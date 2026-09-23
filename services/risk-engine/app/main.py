@@ -76,10 +76,21 @@ async def lifespan(app: FastAPI):
     mongo_client = MongoClient(mongo_url)
     db = mongo_client.get_database("authdb")
 
-    # Build the threat graph from stored history (TRD §7.6)
-    threat_graph = ThreatGraph()
+    # Indexes for the queries the scorer runs on every login (TRD §7.4).
     login_events = db.get_collection("login_events")
     fraud_flags = db.get_collection("fraud_flags")
+    login_events.create_index(
+        "event_id",
+        unique=True,
+        partialFilterExpression={"event_id": {"$type": "string"}},
+    )
+    login_events.create_index([("wallet_address", 1), ("timestamp", -1)])
+    login_events.create_index([("ip_address", 1), ("timestamp", -1)])
+    login_events.create_index([("timestamp", -1)])
+    fraud_flags.create_index("node_ids")
+
+    # Build the threat graph from stored history (TRD §7.6)
+    threat_graph = ThreatGraph()
     threat_graph.rebuild_from_mongo(login_events, fraud_flags)
     logger.info(
         "Threat graph rebuilt: %d nodes, %d edges",
