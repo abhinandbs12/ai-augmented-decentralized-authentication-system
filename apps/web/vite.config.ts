@@ -12,8 +12,9 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
       },
+      // The console's live stream goes through the gateway too.
       '/socket.io': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3000',
         ws: true,
         changeOrigin: true,
       }

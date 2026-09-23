@@ -1,1 +1,72 @@
 @import "tailwindcss";
+
+/* One restrained palette: neutrals, one bank accent, and four state colours.
+   Incident violet is reserved for "authentication paused" and nothing else. */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+  --color-canvas: #f6f8fa;
+  --color-surface: #ffffff;
+  --color-sunken: #f0f3f6;
+  --color-line: #e3e8ee;
+  --color-line-strong: #c9d2dc;
+  --color-ink: #1a2230;
+  --color-ink-2: #414d5e;
+  --color-ink-3: #5c6879;
+
+  --color-accent: #3f47d8;
+  --color-accent-strong: #2f36b8;
+  --color-accent-soft: #eef0ff;
+
+  --color-success: #16794a;
+  --color-success-soft: #e7f5ed;
+  --color-warning: #8f5400;
+  --color-warning-soft: #fdf2df;
+  --color-danger: #b42318;
+  --color-danger-soft: #fdecea;
+  --color-incident: #6d28d9;
+  --color-incident-soft: #f2ecfe;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-strong);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  input {
+    caret-color: var(--color-accent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}

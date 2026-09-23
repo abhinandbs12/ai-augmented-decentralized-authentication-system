@@ -1,81 +1,130 @@
 import { useState, type FormEvent } from 'react';
-import { postJson, signNonce } from '../lib/api';
+import { Card, Steps } from '../components/CustomerFrame';
+import { Button, Notice } from '../components/ui';
+import { ApiError, postJson } from '../lib/api';
+import { describeFactor } from '../lib/factors';
+import type { Session } from '../lib/session';
+import { completeWithSignature, describeFailure } from './Login';
 
 interface OtpProps {
   walletAddress: string;
   otpChallengeId: string;
-  onSignedIn: (sessionToken: string) => void;
+  factors: string[];
+  onSignedIn: (session: Session) => void;
+  onRestart: () => void;
 }
 
-interface OtpResponse {
-  nonce: string;
+interface CodeFailure {
+  title: string;
+  detail: string;
+  final?: boolean;
+  paused?: boolean;
 }
 
-// The middle band: a code by SMS first, and only then the signature request.
-export default function Otp({ walletAddress, otpChallengeId, onSignedIn }: OtpProps) {
+// The middle band: a code by SMS first, and only then the wallet signature.
+export default function Otp({ walletAddress, otpChallengeId, factors, onSignedIn, onRestart }: OtpProps) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [signing, setSigning] = useState(false);
+  const [error, setError] = useState<CodeFailure | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const challenge = await postJson<OtpResponse>('/api/auth/otp/verify', {
+      const challenge = await postJson<{ nonce: string }>('/api/auth/otp/verify', {
         otp_challenge_id: otpChallengeId,
         code,
       });
-
-      const signature = await signNonce(walletAddress, challenge.nonce);
-      const verified = await postJson<{ session_token: string }>('/api/auth/verify', {
-        wallet_address: walletAddress,
-        nonce: challenge.nonce,
-        signature,
-      });
-      onSignedIn(verified.session_token);
-    } catch (otpError) {
-      const remaining = (otpError as { attempts_remaining?: number }).attempts_remaining;
-      setError(
-        remaining === undefined
-          ? (otpError as Error).message
-          : `${(otpError as Error).message} ${remaining} attempts left.`,
-      );
-    } finally {
+      setSigning(true);
+      const session = await completeWithSignature(walletAddress, challenge.nonce);
+      onSignedIn({ ...session, factors, path: 'code' });
+    } catch (failure) {
+      setSigning(false);
+      setCode('');
+      setError(describeCodeFailure(failure));
       setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={submit} className="max-w-md mx-auto mt-24 p-6 bg-white rounded-lg shadow">
-      <h1 className="text-xl font-bold text-gray-900">Enter your code</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        We sent a six-digit code to the phone number on your account.
+    <Card>
+      <h1 className="text-xl font-semibold tracking-tight text-ink">One more check</h1>
+      <p className="mt-2 text-sm text-ink-2">
+        We have sent a 6-digit code to your registered mobile number. It expires in 5 minutes.
       </p>
 
-      <label htmlFor="otp-code" className="mt-6 block text-sm font-medium text-gray-700">
-        Six-digit code
-      </label>
-      <input
-        id="otp-code"
-        inputMode="numeric"
-        pattern="\d{6}"
-        maxLength={6}
-        value={code}
-        onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
-        className="mt-1 w-full rounded border px-3 py-2 tracking-widest"
-        autoFocus
-      />
+      {factors.length > 0 && (
+        <div className="mt-4 rounded-lg bg-sunken p-3 text-sm text-ink-2">
+          <p className="font-medium text-ink">Why we are asking</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {factors.map((factor) => (
+              <li key={factor}>{describeFactor(factor).customer}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-      <button
-        type="submit"
-        disabled={busy || code.length !== 6}
-        className="mt-4 w-full rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50"
-      >
-        {busy ? 'Checking…' : 'Verify'}
-      </button>
+      {signing ? (
+        <Steps
+          steps={[
+            { label: 'Code accepted', state: 'done' },
+            { label: 'Approve in your wallet', state: 'active' },
+            { label: 'Signed in', state: 'waiting' },
+          ]}
+        />
+      ) : error?.final ? null : (
+        <form onSubmit={submit} className="mt-6">
+          <label htmlFor="otp-code" className="block text-sm font-medium text-ink">
+            Code
+          </label>
+          <input
+            id="otp-code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="\d{6}"
+            maxLength={6}
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+            autoFocus
+            aria-invalid={Boolean(error) || undefined}
+            className="tabular mt-1.5 h-12 w-full rounded-lg border border-line-strong bg-surface px-3 text-center text-2xl tracking-[0.5em] outline-none transition-[border-color,box-shadow] duration-150 focus:border-accent focus:shadow-[0_0_0_3px_var(--color-accent-soft)] aria-invalid:border-danger"
+          />
+          <Button type="submit" variant="primary" className="mt-4 w-full" busy={busy} disabled={code.length !== 6}>
+            Verify code
+          </Button>
+        </form>
+      )}
 
-      {error && <p className="mt-4 rounded bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-    </form>
+      {error && (
+        <div className="mt-5 space-y-4">
+          <Notice tone={error.paused ? 'incident' : 'danger'} title={error.title}>
+            {error.detail}
+          </Notice>
+          {error.final && <Button onClick={onRestart}>Back to sign-in</Button>}
+        </div>
+      )}
+    </Card>
   );
+}
+
+function describeCodeFailure(failure: unknown): CodeFailure {
+  if (failure instanceof ApiError) {
+    if (failure.code === 'OTP_INVALID') {
+      const left = failure.attemptsRemaining ?? 0;
+      return { title: 'That code is not correct', detail: `You have ${left} ${left === 1 ? 'try' : 'tries'} left.` };
+    }
+    if (failure.code === 'NONCE_EXPIRED') {
+      return { title: 'This code has expired', detail: 'Start the sign-in again to get a new code.', final: true };
+    }
+    if (failure.code === 'RISK_BLOCKED') {
+      return {
+        title: 'This sign-in has been stopped',
+        detail: 'Too many incorrect codes were entered. For your protection, start again.',
+        final: true,
+      };
+    }
+  }
+  return { ...describeFailure(failure), final: true };
 }

@@ -1,97 +1,102 @@
-import { useState } from 'react';
-import { postJson } from './lib/api';
-import Attempts from './pages/admin/Attempts';
+import { useCallback, useEffect, useState } from 'react';
+import { CustomerFrame } from './components/CustomerFrame';
+import { getJson, postJson } from './lib/api';
+import { loadSession, saveSession, type Session } from './lib/session';
+import Account from './pages/Account';
+import Console from './pages/admin/Console';
 import Login from './pages/Login';
 import Otp from './pages/Otp';
 import Vault from './pages/Vault';
 
 type Screen =
-  | { name: 'vault' }
-  | { name: 'login' }
-  | { name: 'otp'; otpChallengeId: string }
-  | { name: 'signed-in' };
+  | { name: 'welcome' }
+  | { name: 'signing'; wallet: string; attempt: number }
+  | { name: 'code'; wallet: string; otpChallengeId: string; factors: string[] }
+  | { name: 'account' }
+  | { name: 'console' };
 
-// Phase 1 navigation is a plain state machine: three customer screens plus the
-// admin table. A router would add a dependency for four screens.
-function App() {
-  const [walletAddress, setWalletAddress] = useState('');
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [screen, setScreen] = useState<Screen>({ name: 'vault' });
-  const [showDashboard, setShowDashboard] = useState(false);
+// Two audiences, kept apart: the customer sign-in (plain words only) and the
+// operations console for administrator wallets. A router would add a
+// dependency for five screens, so navigation is this small state machine.
+export default function App() {
+  const [session, setSession] = useState<Session | null>(loadSession);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [screen, setScreen] = useState<Screen>(() =>
+    loadSession() ? { name: location.hash === '#console' ? 'console' : 'account' } : { name: 'welcome' },
+  );
+
+  useEffect(() => {
+    if (!session) {
+      setIsAdmin(false);
+      return;
+    }
+    getJson('/api/admin/status', session.token)
+      .then(() => setIsAdmin(true))
+      .catch(() => setIsAdmin(false));
+  }, [session]);
+
+  useEffect(() => {
+    history.replaceState(null, '', screen.name === 'console' ? '#console' : location.pathname);
+  }, [screen.name]);
+
+  const restart = useCallback(() => setScreen({ name: 'welcome' }), []);
+
+  const signedIn = useCallback((next: Session) => {
+    saveSession(next);
+    setSession(next);
+    setScreen({ name: 'account' });
+  }, []);
+
+  const codeRequired = useCallback(
+    (wallet: string) => (challenge: { otpChallengeId: string; factors: string[] }) =>
+      setScreen({ name: 'code', wallet, otpChallengeId: challenge.otpChallengeId, factors: challenge.factors }),
+    [],
+  );
 
   async function signOut() {
-    if (sessionToken) {
-      await postJson('/api/auth/logout', {}, sessionToken).catch(() => undefined);
+    if (session) {
+      await postJson('/api/auth/logout', {}, session.token).catch(() => undefined);
     }
-    setSessionToken(null);
-    setWalletAddress('');
-    setShowDashboard(false);
-    setScreen({ name: 'vault' });
+    saveSession(null);
+    setSession(null);
+    setScreen({ name: 'welcome' });
   }
 
-  function signedIn(token: string) {
-    setSessionToken(token);
-    setScreen({ name: 'signed-in' });
+  if (screen.name === 'console' && session) {
+    return <Console session={session} onExit={() => setScreen({ name: 'account' })} onSignOut={signOut} />;
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {screen.name === 'vault' && (
-        <Vault
-          onConnected={(address) => {
-            setWalletAddress(address);
-            setScreen({ name: 'login' });
-          }}
-        />
+    <CustomerFrame>
+      {screen.name === 'welcome' && (
+        <Vault onWallet={(wallet) => setScreen({ name: 'signing', wallet, attempt: Date.now() })} />
       )}
-
-      {screen.name === 'login' && (
+      {screen.name === 'signing' && (
         <Login
-          walletAddress={walletAddress}
+          key={screen.attempt}
+          walletAddress={screen.wallet}
           onSignedIn={signedIn}
-          onOtpRequired={(otpChallengeId) => setScreen({ name: 'otp', otpChallengeId })}
+          onCodeRequired={codeRequired(screen.wallet)}
+          onRestart={restart}
         />
       )}
-
-      {screen.name === 'otp' && (
+      {screen.name === 'code' && (
         <Otp
-          walletAddress={walletAddress}
+          walletAddress={screen.wallet}
           otpChallengeId={screen.otpChallengeId}
+          factors={screen.factors}
           onSignedIn={signedIn}
+          onRestart={restart}
         />
       )}
-
-      {screen.name === 'signed-in' && (
-        <div>
-          <header className="flex items-center justify-between bg-white px-6 py-3 shadow">
-            <div>
-              <p className="text-sm font-medium text-gray-900">Signed in</p>
-              <p className="font-mono text-xs text-gray-500">{walletAddress}</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowDashboard((visible) => !visible)}
-                className="rounded border px-3 py-1 text-sm"
-              >
-                {showDashboard ? 'Hide dashboard' : 'Admin dashboard'}
-              </button>
-              <button onClick={signOut} className="rounded border px-3 py-1 text-sm">
-                Log out
-              </button>
-            </div>
-          </header>
-
-          {showDashboard ? (
-            <Attempts sessionToken={sessionToken} />
-          ) : (
-            <p className="mx-auto mt-24 max-w-md rounded-lg bg-white p-6 text-sm text-gray-700 shadow">
-              You are signed in. Nothing was typed, stored or sent that could be stolen later.
-            </p>
-          )}
-        </div>
+      {(screen.name === 'account' || screen.name === 'console') && session && (
+        <Account
+          session={session}
+          isAdmin={isAdmin}
+          onSignOut={signOut}
+          onOpenConsole={() => setScreen({ name: 'console' })}
+        />
       )}
-    </div>
+    </CustomerFrame>
   );
 }
-
-export default App;
