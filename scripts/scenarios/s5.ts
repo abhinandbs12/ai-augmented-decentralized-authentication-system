@@ -23,7 +23,7 @@ async function main() {
   console.log(`  Firing ${TOTAL_ATTEMPTS} rapid login attempts...\n`);
 
   for (let i = 0; i < TOTAL_ATTEMPTS; i++) {
-    const wallet = `0xAttacker${String(i).padStart(4, "0")}aabb00112233445566`;
+    const wallet = `0x${String(i + 1).padStart(40, "0")}`;
     try {
       const payload = {
         wallet,
