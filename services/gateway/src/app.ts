@@ -38,6 +38,17 @@ export function createApp(config: GatewayConfig): Express {
     }),
   );
 
+  // Live updates for the operations console. The orchestrator only accepts a
+  // socket that presents an administrator's session in its handshake.
+  app.use(
+    createProxyMiddleware({
+      target: config.orchestratorUrl,
+      pathFilter: '/socket.io',
+      ws: true,
+      on: { error: handleOrchestratorError },
+    }),
+  );
+
   app.use((_req, res) => {
     sendError(res, 'NOT_FOUND');
   });

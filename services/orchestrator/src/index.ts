@@ -4,6 +4,7 @@ import { createApp } from './app';
 import { createMerkleBatcher } from './audit/batcher';
 import { createAuthRegistryClient } from './chain/authRegistryClient';
 import { loadConfig } from './config';
+import { createCircuitBreaker } from './core/circuitBreaker';
 import { createEventReporter } from './core/eventReporter';
 import type { CachedSession } from './core/loginStateMachine';
 import { NonceService } from './core/nonces';
@@ -44,13 +45,25 @@ async function start(): Promise<void> {
   let broadcaster: Realtime = silentRealtime;
   const realtime: Realtime = {
     emitLoginEvent: (event) => broadcaster.emitLoginEvent(event),
+    emitSystem: (state, reason) => broadcaster.emitSystem(state, reason),
     close: () => broadcaster.close(),
   };
+
+  const breaker = createCircuitBreaker({
+    threshold: config.breakerThreshold,
+    windowMs: config.breakerWindowMs,
+    trip: async () => {
+      await chain.pauseAuth();
+      console.warn('Circuit breaker tripped: authentication paused');
+      realtime.emitSystem('paused', 'circuit breaker');
+    },
+  });
+  const sessions = new SessionStore(pool, sessionCache, config.sessionTtlMs);
 
   const app = createApp({
     pool,
     authDb,
-    sessions: new SessionStore(pool, sessionCache, config.sessionTtlMs),
+    sessions,
     sessionCache,
     nonces: new NonceService(pool, config.nonceTtlMs),
     otp: new OtpService(
@@ -63,12 +76,16 @@ async function start(): Promise<void> {
     events: createEventReporter(config.riskEngineUrl, config.internalApiToken),
     batcher,
     realtime,
+    breaker,
     adminWallets: config.adminWallets,
     internalApiToken: config.internalApiToken,
   });
 
   const server = createServer(app);
-  broadcaster = createRealtime(server, process.env.WEB_ORIGIN?.trim() || 'http://localhost:5173');
+  broadcaster = createRealtime(server, async (token) => {
+    const session = await sessions.find(token);
+    return session !== null && config.adminWallets.includes(session.walletAddress.toLowerCase());
+  });
 
   server.listen(config.port, () => {
     console.log(`Orchestrator listening on port ${config.port}`);

@@ -142,6 +142,13 @@ describe('proxying to the orchestrator', () => {
     expect(receivedRequests[0].headers['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
   });
 
+  it('forwards the console socket handshake to the orchestrator', async () => {
+    const response = await request(createGateway()).get('/socket.io/?EIO=4&transport=polling');
+
+    expect(response.status).toBe(200);
+    expect(receivedRequests[0].url).toBe('/socket.io/?EIO=4&transport=polling');
+  });
+
   // The orchestrator accepts the internal token as a service credential, so a
   // client must never be able to smuggle one through the gateway.
   it('drops a client-supplied X-Internal-Token', async () => {

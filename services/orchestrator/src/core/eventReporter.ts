@@ -11,6 +11,7 @@ export interface LoginEventReport {
   deviceFingerprint: string;
   trustScore: number;
   decision: 'allow' | 'otp_required' | 'blocked';
+  factors: string[];
   timestamp: Date;
   verified: boolean;
 }
@@ -39,6 +40,7 @@ export function createEventReporter(baseUrl: string, internalApiToken: string): 
           device_fingerprint: event.deviceFingerprint,
           trust_score: event.trustScore,
           decision: event.decision,
+          factors: event.factors,
           timestamp: event.timestamp.toISOString(),
           verified: event.verified,
         }),

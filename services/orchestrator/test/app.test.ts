@@ -9,6 +9,7 @@ import type { AuditEvent } from '../src/audit/merkleTree';
 import { ChainError, type AuthRegistryClient } from '../src/chain/authRegistryClient';
 import type { EventReporter, LoginEventReport } from '../src/core/eventReporter';
 import type { CachedSession } from '../src/core/loginStateMachine';
+import { createCircuitBreaker } from '../src/core/circuitBreaker';
 import { NonceService } from '../src/core/nonces';
 import type { RiskEngine } from '../src/core/riskEngineClient';
 import { SessionStore } from '../src/core/sessions';
@@ -162,6 +163,7 @@ const INTERNAL_TOKEN = 'internal-token-for-tests';
 
 interface TestContext {
   app: ReturnType<typeof createApp>;
+  system: string[];
   chain: AuthRegistryClient;
   reported: LoginEventReport[];
   anchored: AuditEvent[];
@@ -228,6 +230,15 @@ function createTestApp(): TestContext {
     collection: (name: string) => (name === 'login_events' ? fakeCollection(loginEvents) : fakeCollection([])),
   } as unknown as Db;
 
+  const system: string[] = [];
+  const breaker = createCircuitBreaker({
+    threshold: 3,
+    windowMs: 10_000,
+    trip: async () => {
+      await chain.pauseAuth();
+    },
+  });
+
   const dependencies: AppDependencies = {
     pool,
     authDb,
@@ -239,13 +250,15 @@ function createTestApp(): TestContext {
     riskEngine,
     events,
     batcher,
-    realtime: { emitLoginEvent: () => undefined, close: async () => undefined },
+    realtime: { emitLoginEvent: () => undefined, emitSystem: (state) => void system.push(state), close: async () => undefined },
+    breaker,
     adminWallets: [ADMIN_WALLET],
     internalApiToken: INTERNAL_TOKEN,
   };
 
   return {
     app: createApp(dependencies),
+    system,
     chain,
     reported,
     anchored,
@@ -749,6 +762,35 @@ describe('orchestrator app', () => {
     });
   });
 
+  describe('circuit breaker', () => {
+    it('pauses authentication once more than the threshold of blocked attempts arrive', async () => {
+      await registerWallet(context);
+      context.setScore(10);
+
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await request(context.app)
+          .post('/api/auth/login')
+          .send({ wallet_address: WALLET, device_fingerprint: DEVICE });
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(context.chain.pauseAuth).toHaveBeenCalledOnce();
+    });
+
+    it('reports the breaker and re-arms it on resume', async () => {
+      const status = await request(context.app)
+        .get('/api/admin/status')
+        .set('X-Internal-Token', INTERNAL_TOKEN);
+      await request(context.app).post('/api/admin/resume').set('X-Internal-Token', INTERNAL_TOKEN);
+
+      expect(status.body).toEqual({
+        paused: false,
+        breaker: { anomalous_in_window: 0, threshold: 3, window_ms: 10_000 },
+      });
+      expect(context.system).toEqual(['resumed']);
+    });
+  });
+
   describe('audit routes', () => {
     it('refuses an anonymous caller', async () => {
       const response = await request(context.app).get(`/api/audit/proof/${ANCHORED_EVENT_ID}`);
@@ -765,6 +807,7 @@ describe('orchestrator app', () => {
       expect(response.body).toMatchObject({ event_id: ANCHORED_EVENT_ID, batch_id: 0, leaf_index: 0 });
       expect(response.body.siblings).toHaveLength(1);
       expect(response.body.current_leaf_hash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(response.body.event).toMatchObject({ eventId: ANCHORED_EVENT_ID, trustScore: 96, decision: 'allow' });
     });
 
     it('reports an event that has not been anchored yet', async () => {

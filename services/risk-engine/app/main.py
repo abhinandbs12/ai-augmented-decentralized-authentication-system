@@ -195,6 +195,10 @@ class LoginEvent(BaseModel):
     decision: str = Field(..., description="Final decision: allow, otp_required, blocked")
     timestamp: datetime = Field(..., description="Timestamp of the login attempt")
     event_id: str | None = Field(None, description="Event ID for Merkle batching")
+    factors: list[str] = Field(
+        default_factory=list,
+        description="Penalty reasons the scorer applied, shown to analysts",
+    )
     verified: bool = Field(
         False,
         description="True only once the signature was verified on-chain; "
@@ -245,6 +249,7 @@ async def record_event(
         "decision": event.decision,
         "timestamp": event.timestamp,
         "region": lookup_region(event.ip_address),
+        "factors": event.factors,
         "verified": event.verified,
     }
 

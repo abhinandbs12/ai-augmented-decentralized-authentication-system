@@ -1,13 +1,17 @@
 import { Router, type RequestHandler } from 'express';
 import type { Db } from 'mongodb';
 import { ChainError, type AuthRegistryClient } from '../chain/authRegistryClient';
+import type { CircuitBreaker } from '../core/circuitBreaker';
 import { sendError, type ErrorCode } from '../errors';
+import type { Realtime } from '../realtime/socket';
 import { parseTopAttemptsLimit } from './topAttemptsLimit';
 import { asyncRoute } from './validators';
 
 export interface AdminDependencies {
   authDb: Db;
   chain: AuthRegistryClient;
+  breaker: CircuitBreaker;
+  realtime: Realtime;
   requireAdmin: RequestHandler;
 }
 
@@ -52,6 +56,7 @@ export function createAdminRoutes(deps: AdminDependencies): Router {
             device_fingerprint: attempt.device_fingerprint,
             trust_score: attempt.trust_score,
             decision: attempt.decision,
+            factors: attempt.factors ?? [],
             verified: attempt.verified ?? false,
             timestamp: attempt.timestamp,
             cluster_id: flag ? flag.cluster_id : undefined,
@@ -68,14 +73,21 @@ export function createAdminRoutes(deps: AdminDependencies): Router {
   router.post(
     '/pause',
     asyncRoute(async (_req, res) => {
-      await callChain(res, () => deps.chain.pauseAuth(), (txHash) => ({ paused: true, tx_hash: txHash }));
+      await callChain(res, () => deps.chain.pauseAuth(), (txHash) => {
+        deps.realtime.emitSystem('paused', 'administrator');
+        return { paused: true, tx_hash: txHash };
+      });
     }),
   );
 
   router.post(
     '/resume',
     asyncRoute(async (_req, res) => {
-      await callChain(res, () => deps.chain.resumeAuth(), (txHash) => ({ paused: false, tx_hash: txHash }));
+      await callChain(res, () => deps.chain.resumeAuth(), (txHash) => {
+        deps.breaker.reset();
+        deps.realtime.emitSystem('resumed', 'administrator');
+        return { paused: false, tx_hash: txHash };
+      });
     }),
   );
 
@@ -83,7 +95,15 @@ export function createAdminRoutes(deps: AdminDependencies): Router {
     '/status',
     asyncRoute(async (_req, res) => {
       try {
-        res.json({ paused: await deps.chain.isPaused() });
+        const breaker = deps.breaker.status();
+        res.json({
+          paused: await deps.chain.isPaused(),
+          breaker: {
+            anomalous_in_window: breaker.anomalousInWindow,
+            threshold: breaker.threshold,
+            window_ms: breaker.windowMs,
+          },
+        });
       } catch (error) {
         sendError(res, CHAIN_ERROR_RESPONSES[(error as ChainError).code] ?? 'CHAIN_UNAVAILABLE');
       }

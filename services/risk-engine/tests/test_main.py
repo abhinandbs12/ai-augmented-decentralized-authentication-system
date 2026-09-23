@@ -150,6 +150,16 @@ class TestEventRecording:
         assert len(login_events.documents) == 1
         assert login_events.documents[0]["verified"] is False
         assert login_events.documents[0]["decision"] == "otp_required"
+        assert login_events.documents[0]["factors"] == []
+
+    def test_keeps_the_scoring_factors(self, client, login_events):
+        client.post(
+            "/event",
+            json={**SAMPLE_EVENT, "factors": ["unrecognized_device"]},
+            headers={"X-Internal-Token": TOKEN},
+        )
+
+        assert login_events.documents[0]["factors"] == ["unrecognized_device"]
 
     def test_second_call_with_the_same_event_id_updates_the_first(
         self, client, login_events

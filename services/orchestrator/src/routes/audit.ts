@@ -36,8 +36,11 @@ export function createAuditRoutes(deps: AuditDependencies): Router {
         events.map(async (event) => ({
           event_id: event.event_id,
           wallet_address: event.wallet_address,
+          ip_address: event.ip_address,
+          device_fingerprint: event.device_fingerprint,
           trust_score: event.trust_score,
           decision: event.decision,
+          factors: event.factors ?? [],
           verified: event.verified ?? false,
           timestamp: event.timestamp,
           batch_id: (await findLeafByEventId(deps.pool, event.event_id))?.batchId ?? null,
@@ -71,6 +74,9 @@ export function createAuditRoutes(deps: AuditDependencies): Router {
         leaf_index: anchoredLeaf.leafIndex,
         leaf_hash: anchoredLeaf.leafHash,
         current_leaf_hash: storedEvent ? leafHash(toAuditEvent(storedEvent)) : null,
+        // The fields exactly as they are stored now, so the browser can hash
+        // them itself instead of trusting current_leaf_hash (FR-29).
+        event: storedEvent ? toAuditEvent(storedEvent) : null,
         siblings: merkleProof(leaves, anchoredLeaf.leafIndex),
       });
     }),

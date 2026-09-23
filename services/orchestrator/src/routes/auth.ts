@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import type { MerkleBatcher } from '../audit/batcher';
 import type { AuditEvent } from '../audit/merkleTree';
 import { ChainError, type AuthRegistryClient } from '../chain/authRegistryClient';
+import type { CircuitBreaker } from '../core/circuitBreaker';
 import type { EventReporter, LoginEventReport } from '../core/eventReporter';
 import { handleLogin, type CachedSession } from '../core/loginStateMachine';
 import type { NonceService } from '../core/nonces';
@@ -35,6 +36,7 @@ export interface AuthDependencies {
   events: EventReporter;
   batcher: MerkleBatcher;
   realtime: Realtime;
+  breaker: CircuitBreaker;
   requireSession: RequestHandler;
 }
 
@@ -129,6 +131,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         return;
       }
 
+      deps.breaker.record(result.trustScore);
       const decision = DECISIONS[result.state];
       await reportAttempt(deps, {
         eventId: eventIdOf(result),
@@ -137,6 +140,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         deviceFingerprint,
         trustScore: result.trustScore,
         decision,
+        factors: result.reasons,
         timestamp: new Date(),
         verified: false,
       });
@@ -213,6 +217,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         deviceFingerprint: consumption.deviceFingerprint,
         trustScore: consumption.trustScore,
         decision: 'allow',
+        factors: [],
         timestamp: new Date(),
         verified: true,
       });
@@ -314,6 +319,8 @@ async function reportAttempt(deps: AuthDependencies, event: LoginEventReport): P
     device_fingerprint: event.deviceFingerprint,
     trust_score: event.trustScore,
     decision: event.decision,
+    factors: event.factors,
+    verified: event.verified,
     timestamp: event.timestamp.toISOString(),
   });
 

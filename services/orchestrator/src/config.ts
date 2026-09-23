@@ -18,6 +18,8 @@ export interface OrchestratorConfig {
   twilio: TwilioConfig | null;
   merkleBatchSize: number;
   merkleBatchIntervalMs: number;
+  breakerThreshold: number;
+  breakerWindowMs: number;
 }
 
 export interface TwilioConfig {
@@ -29,7 +31,8 @@ export interface TwilioConfig {
 const MINUTE_MS = 60_000;
 
 // TRD §11.3 (30 minute sessions, 1000 cached), §11.2 (5 minute nonces),
-// §5.5 (5 minute OTP, 3 attempts) and §5.4 (16 events or 60 seconds).
+// §5.5 (5 minute OTP, 3 attempts), §5.4 (16 events or 60 seconds) and §12.3
+// (circuit breaker: more than 50 anomalous attempts in 10 seconds).
 const DEFAULTS = {
   port: 3001,
   sessionTtlMinutes: 30,
@@ -39,6 +42,8 @@ const DEFAULTS = {
   otpMaxAttempts: 3,
   merkleBatchSize: 16,
   merkleBatchIntervalMs: 60_000,
+  breakerThreshold: 50,
+  breakerWindowMs: 10_000,
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorConfig {
@@ -60,6 +65,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
     twilio: readTwilio(env),
     merkleBatchSize: readPositiveInteger(env, 'MERKLE_BATCH_SIZE', DEFAULTS.merkleBatchSize),
     merkleBatchIntervalMs: readPositiveInteger(env, 'MERKLE_BATCH_MS', DEFAULTS.merkleBatchIntervalMs),
+    breakerThreshold: readPositiveInteger(env, 'BREAKER_THRESHOLD', DEFAULTS.breakerThreshold),
+    breakerWindowMs: readPositiveInteger(env, 'BREAKER_WINDOW_MS', DEFAULTS.breakerWindowMs),
   };
 }
 

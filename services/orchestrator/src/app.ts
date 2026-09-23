@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import type { MerkleBatcher } from './audit/batcher';
 import type { AuthRegistryClient } from './chain/authRegistryClient';
 import type { EventReporter } from './core/eventReporter';
+import type { CircuitBreaker } from './core/circuitBreaker';
 import type { CachedSession } from './core/loginStateMachine';
 import type { NonceService } from './core/nonces';
 import type { RiskEngine } from './core/riskEngineClient';
@@ -31,6 +32,7 @@ export interface AppDependencies {
   events: EventReporter;
   batcher: MerkleBatcher;
   realtime: Realtime;
+  breaker: CircuitBreaker;
   adminWallets: string[];
   internalApiToken: string;
 }
@@ -53,7 +55,13 @@ export function createApp(deps: AppDependencies): Express {
   });
 
   app.use('/api/auth', createAuthRoutes({ ...deps, requireSession }));
-  app.use('/api/admin', createAdminRoutes({ authDb: deps.authDb, chain: deps.chain, requireAdmin }));
+  app.use('/api/admin', createAdminRoutes({
+      authDb: deps.authDb,
+      chain: deps.chain,
+      breaker: deps.breaker,
+      realtime: deps.realtime,
+      requireAdmin,
+    }));
   app.use(
     '/api/audit',
     createAuditRoutes({ pool: deps.pool, authDb: deps.authDb, chain: deps.chain, requireAdmin }),
