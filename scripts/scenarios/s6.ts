@@ -9,6 +9,8 @@
  * Ref: PRD §3.3, scenario S6; test cases TC-06 and TC-07
  */
 
+import { internalHeaders } from "../internalToken";
+
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
 
 async function main() {
@@ -19,11 +21,12 @@ async function main() {
   let eventId: string | null = null;
 
   try {
-    const eventsRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/events`);
+    const eventsRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/events`, {
+      headers: internalHeaders(),
+    });
     if (!eventsRes.ok) {
       console.log(`  ⚠️  GET /api/audit/events returned ${eventsRes.status}`);
-      console.log("     This endpoint is owned by Karthik — may not be implemented yet.");
-      console.log("\n  ⏭️  SKIP — Waiting for Karthik's audit module.");
+        console.log("\n  ⏭️  SKIP — Waiting for Karthik's audit module.");
       return;
     }
     const events = await eventsRes.json();
@@ -43,7 +46,9 @@ async function main() {
   // Step 2: Fetch the Merkle proof
   console.log("\n  Step 2: Fetching Merkle proof...");
   try {
-    const proofRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/proof/${eventId}`);
+    const proofRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/proof/${eventId}`, {
+      headers: internalHeaders(),
+    });
     if (!proofRes.ok) {
       console.log(`  ⚠️  GET /api/audit/proof/${eventId} returned ${proofRes.status}`);
       console.log("\n  ⏭️  SKIP — Audit proof endpoint not ready.");
@@ -56,7 +61,9 @@ async function main() {
 
     // Step 3: Fetch the on-chain root
     console.log("\n  Step 3: Fetching on-chain Merkle root...");
-    const rootRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/root/${proof.batch_id}`);
+    const rootRes = await fetch(`${ORCHESTRATOR_URL}/api/audit/root/${proof.batch_id}`, {
+      headers: internalHeaders(),
+    });
     if (!rootRes.ok) {
       console.log(`  ⚠️  GET /api/audit/root/${proof.batch_id} returned ${rootRes.status}`);
       console.log("\n  ⏭️  SKIP — Root endpoint not ready.");
