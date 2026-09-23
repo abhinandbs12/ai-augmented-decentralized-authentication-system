@@ -11,7 +11,8 @@ const config: HardhatUserConfig = {
   },
   networks: {
     localhost: {
-      url: "http://127.0.0.1:8545",
+      // RPC_URL lets the same command run against the Hardhat container.
+      url: process.env.RPC_URL || "http://127.0.0.1:8545",
     },
   },
 };

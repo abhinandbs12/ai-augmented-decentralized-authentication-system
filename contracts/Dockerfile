@@ -6,6 +6,8 @@ RUN npm ci
 
 COPY tsconfig.json hardhat.config.ts ./
 COPY contracts/ ./contracts/
+COPY scripts/ ./scripts/
+COPY test/ ./test/
 
 RUN npx hardhat compile
 

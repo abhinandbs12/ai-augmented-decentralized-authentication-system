@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Deploys AuthRegistry once the chain is up and writes the address to the
+  # shared volume, so no address has to be copied by hand (TRD 10.3).
+  contract-deploy:
+    build: ./contracts
+    command: ["npx", "hardhat", "run", "scripts/deploy.ts", "--network", "localhost"]
+    environment:
+      RPC_URL: http://hardhat:8545
+      CONTRACT_ADDRESS_FILE: /shared/contract-address.txt
+    volumes:
+      - chain-state:/shared
+    restart: "no"
+    depends_on:
+      hardhat:
+        condition: service_healthy
+
   # --- Backend Services ---
   gateway:
     build: ./services/gateway
@@ -36,6 +51,10 @@ services:
       RISK_ENGINE_URL: http://risk-engine:8001
       DATABASE_URL: postgres://authuser:authpass@postgres:5432/authdb
       MONGO_URL: mongodb://mongo:27017
+      RPC_URL: http://hardhat:8545
+      CONTRACT_ADDRESS_FILE: /shared/contract-address.txt
+    volumes:
+      - chain-state:/shared:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +62,8 @@ services:
         condition: service_started
       risk-engine:
         condition: service_healthy
+      contract-deploy:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 5s
@@ -81,3 +102,6 @@ services:
 
   mongo:
     image: mongo:7
+
+volumes:
+  chain-state:
