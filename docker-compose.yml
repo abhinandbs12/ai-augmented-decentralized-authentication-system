@@ -49,7 +49,7 @@ services:
     env_file: .env
     environment:
       RISK_ENGINE_URL: http://risk-engine:8001
-      DATABASE_URL: postgres://authuser:authpass@postgres:5432/authdb
+      DATABASE_URL: postgres://${POSTGRES_USER:-authuser}:${POSTGRES_PASSWORD:-authpass}@postgres:5432/${POSTGRES_DB:-authdb}
       MONGO_URL: mongodb://mongo:27017
       RPC_URL: http://hardhat:8545
       CONTRACT_ADDRESS_FILE: /shared/contract-address.txt
@@ -91,11 +91,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: authuser
-      POSTGRES_PASSWORD: authpass
-      POSTGRES_DB: authdb
+      # Local demo defaults. Set these in .env to use anything else; no
+      # credential is fixed in a committed file.
+      POSTGRES_USER: ${POSTGRES_USER:-authuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authpass}
+      POSTGRES_DB: ${POSTGRES_DB:-authdb}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-authuser} -d $${POSTGRES_DB:-authdb}"]
       interval: 5s
       timeout: 5s
       retries: 10
