@@ -1,0 +1,13 @@
+# Development-only overlay: publishes the internal services on the loopback address
+# so the seed and scenario scripts can reach them from the host.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# The demo and the Phase 1 review run on docker-compose.yml alone.
+
+services:
+  orchestrator:
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  risk-engine:
+    ports:
+      - "127.0.0.1:8001:8001"
