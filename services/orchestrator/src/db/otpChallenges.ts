@@ -5,6 +5,7 @@ export interface OtpChallenge {
   walletAddress: string;
   codeHash: string;
   trustScore: number;
+  deviceFingerprint: string;
   attempts: number;
   verified: boolean;
   expired: boolean;
@@ -12,13 +13,25 @@ export interface OtpChallenge {
 
 export async function insertOtpChallenge(
   pool: Pool,
-  challenge: { walletAddress: string; codeHash: string; trustScore: number; expiresAt: Date },
+  challenge: {
+    walletAddress: string;
+    codeHash: string;
+    trustScore: number;
+    deviceFingerprint: string;
+    expiresAt: Date;
+  },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO otp_challenges (wallet_address, code_hash, trust_score, expires_at)
-     VALUES (lower($1), $2, $3, $4)
+    `INSERT INTO otp_challenges (wallet_address, code_hash, trust_score, device_fingerprint, expires_at)
+     VALUES (lower($1), $2, $3, $4, $5)
      RETURNING id`,
-    [challenge.walletAddress, challenge.codeHash, challenge.trustScore, challenge.expiresAt],
+    [
+      challenge.walletAddress,
+      challenge.codeHash,
+      challenge.trustScore,
+      challenge.deviceFingerprint,
+      challenge.expiresAt,
+    ],
   );
 
   return result.rows[0].id;
@@ -30,11 +43,13 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     wallet_address: string;
     code_hash: string;
     trust_score: number;
+    device_fingerprint: string;
     attempts: number;
     verified: boolean;
     expired: boolean;
   }>(
-    `SELECT id, wallet_address, code_hash, trust_score, attempts, verified, expires_at <= now() AS expired
+    `SELECT id, wallet_address, code_hash, trust_score, device_fingerprint, attempts, verified,
+            expires_at <= now() AS expired
      FROM otp_challenges WHERE id = $1`,
     [id],
   );
@@ -49,6 +64,7 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     walletAddress: row.wallet_address,
     codeHash: row.code_hash,
     trustScore: row.trust_score,
+    deviceFingerprint: row.device_fingerprint,
     attempts: row.attempts,
     verified: row.verified,
     expired: row.expired,

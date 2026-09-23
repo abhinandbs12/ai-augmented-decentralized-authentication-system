@@ -94,27 +94,6 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
     }),
   );
 
-  // A nonce on its own grants nothing, so this endpoint does not reveal whether
-  // the wallet is registered; the signature check decides that later.
-  router.post(
-    '/nonce',
-    asyncRoute(async (req, res) => {
-      const walletAddress = req.body?.wallet_address;
-      if (!isWalletAddress(walletAddress)) {
-        sendError(res, 'INVALID_REQUEST');
-        return;
-      }
-
-      const nonce = await deps.nonces.issue(walletAddress, 0);
-      res.json({
-        wallet_address: walletAddress,
-        nonce: nonce.nonce,
-        challenge_id: nonce.challengeId,
-        expires_at: nonce.expiresAt.toISOString(),
-      });
-    }),
-  );
-
   // Step one of a login: score the attempt and route it. No signature challenge
   // exists before this decision (FR-09, TRD §6.3).
   router.post(
@@ -139,9 +118,9 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         {
           sessionCache: deps.sessionCache,
           riskEngine: deps.riskEngine,
-          issueNonce: (wallet, trustScore) => deps.nonces.issue(wallet, trustScore),
+          issueNonce: (wallet, trustScore) => deps.nonces.issue(wallet, trustScore, deviceFingerprint),
           startOtpChallenge: (wallet, trustScore) =>
-            deps.otp.start(wallet, user?.phoneNumber ?? null, trustScore),
+            deps.otp.start(wallet, user?.phoneNumber ?? null, trustScore, deviceFingerprint),
         },
       );
 
@@ -231,7 +210,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
         eventId: consumption.nonceId,
         walletAddress: user.walletAddress,
         ipAddress: clientIp(req),
-        deviceFingerprint: typeof req.body?.device_fingerprint === 'string' ? req.body.device_fingerprint : '',
+        deviceFingerprint: consumption.deviceFingerprint,
         trustScore: consumption.trustScore,
         decision: 'allow',
         timestamp: new Date(),
@@ -260,7 +239,11 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
       const verification = await deps.otp.verify(challengeId, code);
 
       if (verification.status === 'verified') {
-        const nonce = await deps.nonces.issue(verification.walletAddress, verification.trustScore);
+        const nonce = await deps.nonces.issue(
+          verification.walletAddress,
+          verification.trustScore,
+          verification.deviceFingerprint,
+        );
         res.json({
           decision: 'allow',
           trust_score: verification.trustScore,

@@ -1,20 +1,26 @@
 import type { Pool } from 'pg';
 
 export type NonceConsumption =
-  | { status: 'consumed'; nonceId: string; trustScore: number }
+  | { status: 'consumed'; nonceId: string; trustScore: number; deviceFingerprint: string }
   | { status: 'unknown' }
   | { status: 'used' }
   | { status: 'expired' };
 
 export async function insertNonce(
   pool: Pool,
-  nonce: { walletAddress: string; value: string; trustScore: number; expiresAt: Date },
+  nonce: {
+    walletAddress: string;
+    value: string;
+    trustScore: number;
+    deviceFingerprint: string;
+    expiresAt: Date;
+  },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO nonces (wallet_address, nonce_value, trust_score, expires_at)
-     VALUES (lower($1), $2, $3, $4)
+    `INSERT INTO nonces (wallet_address, nonce_value, trust_score, device_fingerprint, expires_at)
+     VALUES (lower($1), $2, $3, $4, $5)
      RETURNING id`,
-    [nonce.walletAddress, nonce.value, nonce.trustScore, nonce.expiresAt],
+    [nonce.walletAddress, nonce.value, nonce.trustScore, nonce.deviceFingerprint, nonce.expiresAt],
   );
 
   return result.rows[0].id;
@@ -27,17 +33,22 @@ export async function consumeNonce(
   walletAddress: string,
   value: string,
 ): Promise<NonceConsumption> {
-  const consumed = await pool.query<{ id: string; trust_score: number }>(
+  const consumed = await pool.query<{ id: string; trust_score: number; device_fingerprint: string }>(
     `UPDATE nonces SET used = true
      WHERE wallet_address = lower($1) AND nonce_value = $2
        AND used = false AND expires_at > now()
-     RETURNING id, trust_score`,
+     RETURNING id, trust_score, device_fingerprint`,
     [walletAddress, value],
   );
 
   if (consumed.rowCount === 1) {
     const row = consumed.rows[0];
-    return { status: 'consumed', nonceId: row.id, trustScore: row.trust_score };
+    return {
+      status: 'consumed',
+      nonceId: row.id,
+      trustScore: row.trust_score,
+      deviceFingerprint: row.device_fingerprint,
+    };
   }
 
   const existing = await pool.query<{ used: boolean; expired: boolean }>(

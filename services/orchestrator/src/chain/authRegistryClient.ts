@@ -1,5 +1,6 @@
 import {
   Contract,
+  getAddress,
   isError,
   JsonRpcProvider,
   Wallet,
@@ -134,13 +135,13 @@ export function createAuthRegistryClient(options: ChainOptions): AuthRegistryCli
 
   return {
     async registerUser(walletAddress) {
-      const { txHash } = await send((contract) => contract.registerUser(walletAddress));
+      const { txHash } = await send((contract) => contract.registerUser(normalise(walletAddress)));
       return { txHash };
     },
 
     async verifySignature(walletAddress, nonce, signature) {
       const { txHash } = await send((contract) =>
-        contract.verifySignature(walletAddress, `0x${nonce}`, signature),
+        contract.verifySignature(normalise(walletAddress), `0x${nonce}`, signature),
       );
       return { txHash };
     },
@@ -176,6 +177,13 @@ export function createAuthRegistryClient(options: ChainOptions): AuthRegistryCli
       }
     },
   };
+}
+
+// ethers rejects a mixed-case address whose EIP-55 checksum does not match.
+// Addresses reach us in whatever case the client used, and on-chain they are
+// plain bytes, so the case is normalised before every call.
+function normalise(walletAddress: string): string {
+  return getAddress(walletAddress.toLowerCase());
 }
 
 // The contract assigns the batch id, so it is read back from the event the

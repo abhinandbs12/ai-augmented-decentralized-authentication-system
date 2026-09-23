@@ -20,10 +20,6 @@ const registerBody = z.object({
   phone_number: phoneNumber.optional(),
 });
 
-const nonceBody = z.object({
-  wallet_address: walletAddress,
-});
-
 const loginBody = z.object({
   wallet_address: walletAddress,
   device_fingerprint: hex32Bytes,
@@ -63,7 +59,6 @@ function validateBody(schema: z.ZodType) {
 export const authBodyValidator = Router();
 
 authBodyValidator.post('/register', parseJsonBody, validateBody(registerBody));
-authBodyValidator.post('/nonce', parseJsonBody, validateBody(nonceBody));
 authBodyValidator.post('/login', parseJsonBody, validateBody(loginBody));
 authBodyValidator.post('/verify', parseJsonBody, validateBody(verifyBody));
 authBodyValidator.post('/otp/verify', parseJsonBody, validateBody(otpVerifyBody));

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS otp_challenges (
   wallet_address  text NOT NULL,
   code_hash       text NOT NULL,
   trust_score     integer NOT NULL CHECK (trust_score BETWEEN 0 AND 100),
+  device_fingerprint text NOT NULL,
   attempts        integer NOT NULL DEFAULT 0,
   verified        boolean NOT NULL DEFAULT false,
   expires_at      timestamptz NOT NULL,

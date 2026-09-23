@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS nonces (
   wallet_address  text NOT NULL,
   nonce_value     text NOT NULL,
   trust_score     integer NOT NULL CHECK (trust_score BETWEEN 0 AND 100),
+  device_fingerprint text NOT NULL,
   used            boolean NOT NULL DEFAULT false,
   expires_at      timestamptz NOT NULL,
   created_at      timestamptz NOT NULL DEFAULT now(),

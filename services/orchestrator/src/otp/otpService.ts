@@ -9,7 +9,7 @@ import {
 } from '../db/otpChallenges';
 
 export type OtpVerification =
-  | { status: 'verified'; walletAddress: string; trustScore: number }
+  | { status: 'verified'; walletAddress: string; trustScore: number; deviceFingerprint: string }
   | { status: 'invalid'; attemptsRemaining: number }
   | { status: 'destroyed' }
   | { status: 'expired' }
@@ -38,12 +38,18 @@ export class OtpService {
     private readonly sender: OtpSender,
   ) {}
 
-  async start(walletAddress: string, phoneNumber: string | null, trustScore: number): Promise<string> {
+  async start(
+    walletAddress: string,
+    phoneNumber: string | null,
+    trustScore: number,
+    deviceFingerprint: string,
+  ): Promise<string> {
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const challengeId = await insertOtpChallenge(this.pool, {
       walletAddress,
       codeHash: hashCode(code),
       trustScore,
+      deviceFingerprint,
       expiresAt: new Date(Date.now() + this.options.ttlMs),
     });
 
@@ -76,7 +82,12 @@ export class OtpService {
     if (matches(challenge.codeHash, code)) {
       const claimed = await markOtpVerified(this.pool, challengeId);
       return claimed
-        ? { status: 'verified', walletAddress: challenge.walletAddress, trustScore: challenge.trustScore }
+        ? {
+            status: 'verified',
+            walletAddress: challenge.walletAddress,
+            trustScore: challenge.trustScore,
+            deviceFingerprint: challenge.deviceFingerprint,
+          }
         : { status: 'destroyed' };
     }
 

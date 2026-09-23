@@ -11,13 +11,14 @@ export class NonceService {
     private readonly ttlMs: number,
   ) {}
 
-  async issue(walletAddress: string, trustScore: number): Promise<IssuedNonce> {
+  async issue(walletAddress: string, trustScore: number, deviceFingerprint: string): Promise<IssuedNonce> {
     const nonce = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + this.ttlMs);
     const challengeId = await insertNonce(this.pool, {
       walletAddress,
       value: nonce,
       trustScore,
+      deviceFingerprint,
       expiresAt,
     });
 

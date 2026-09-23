@@ -124,7 +124,7 @@ describe('proxying to the orchestrator', () => {
 
   it('sends its own request id to the orchestrator and ignores one supplied by the client', async () => {
     const response = await request(createGateway())
-      .post('/api/auth/nonce')
+      .post('/api/auth/register')
       .set('X-Request-Id', 'client-chosen-id')
       .send({ wallet_address: WALLET });
 
@@ -135,7 +135,7 @@ describe('proxying to the orchestrator', () => {
 
   it('replaces a client-supplied X-Forwarded-For with the real client address', async () => {
     await request(createGateway())
-      .post('/api/auth/nonce')
+      .post('/api/auth/register')
       .set('X-Forwarded-For', '198.51.100.7')
       .send({ wallet_address: WALLET });
 
@@ -146,7 +146,7 @@ describe('proxying to the orchestrator', () => {
   // client must never be able to smuggle one through the gateway.
   it('drops a client-supplied X-Internal-Token', async () => {
     await request(createGateway())
-      .post('/api/auth/nonce')
+      .post('/api/auth/register')
       .set('X-Internal-Token', 'stolen-or-guessed')
       .send({ wallet_address: WALLET });
 
@@ -221,7 +221,6 @@ describe('request validation', () => {
   it.each([
     ['/api/auth/register', { wallet_address: WALLET }],
     ['/api/auth/register', { wallet_address: WALLET, display_name: 'Asha R', phone_number: '+919876543210' }],
-    ['/api/auth/nonce', { wallet_address: WALLET }],
     ['/api/auth/login', { wallet_address: WALLET, device_fingerprint: FINGERPRINT }],
     ['/api/auth/verify', { wallet_address: WALLET, nonce: NONCE, signature: SIGNATURE }],
     ['/api/auth/otp/verify', { otp_challenge_id: OTP_CHALLENGE_ID, code: '123456' }],
@@ -237,7 +236,7 @@ describe('request validation', () => {
     ['/api/auth/register', { wallet_address: '0x1234' }],
     ['/api/auth/register', { wallet_address: WALLET, phone_number: '98765' }],
     ['/api/auth/register', { wallet_address: WALLET, display_name: '   ' }],
-    ['/api/auth/nonce', { wallet_address: 12345 }],
+    ['/api/auth/register', { wallet_address: 12345 }],
     ['/api/auth/login', { wallet_address: WALLET }],
     ['/api/auth/login', { wallet_address: WALLET, device_fingerprint: 'short' }],
     ['/api/auth/login', [WALLET, FINGERPRINT]],
@@ -316,9 +315,9 @@ describe('rate limiting', () => {
     const gateway = createGateway({ capacity: 2, refillIntervalMs: 60_000 });
     const body = { wallet_address: WALLET };
 
-    await request(gateway).post('/api/auth/nonce').send(body);
-    await request(gateway).post('/api/auth/nonce').send(body);
-    const response = await request(gateway).post('/api/auth/nonce').send(body);
+    await request(gateway).post('/api/auth/register').send(body);
+    await request(gateway).post('/api/auth/register').send(body);
+    const response = await request(gateway).post('/api/auth/register').send(body);
 
     expectErrorBody(response, 429, 'RATE_LIMITED');
     expect(receivedRequests).toHaveLength(2);
@@ -341,9 +340,9 @@ describe('rate limiting', () => {
     const gateway = createGateway({ capacity: 1, refillIntervalMs: 60_000 });
     const body = { wallet_address: WALLET };
 
-    await request(gateway).post('/api/auth/nonce').set('X-Forwarded-For', '198.51.100.1').send(body);
+    await request(gateway).post('/api/auth/register').set('X-Forwarded-For', '198.51.100.1').send(body);
     const response = await request(gateway)
-      .post('/api/auth/nonce')
+      .post('/api/auth/register')
       .set('X-Forwarded-For', '198.51.100.2')
       .send(body);
 

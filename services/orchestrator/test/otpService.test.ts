@@ -8,6 +8,7 @@ interface StoredChallenge {
   walletAddress: string;
   codeHash: string;
   trustScore: number;
+  deviceFingerprint: string;
   attempts: number;
   verified: boolean;
   expired: boolean;
@@ -20,7 +21,7 @@ const challenges = vi.hoisted(() => new Map<string, StoredChallenge>());
 vi.mock('../src/db/otpChallenges', () => ({
   insertOtpChallenge: async (
     _pool: Pool,
-    challenge: { walletAddress: string; codeHash: string; trustScore: number },
+    challenge: { walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string },
   ) => {
     const id = `00000000-0000-4000-8000-${String(challenges.size + 1).padStart(12, '0')}`;
     challenges.set(id, { id, ...challenge, attempts: 0, verified: false, expired: false });
@@ -52,6 +53,7 @@ const pool = {} as Pool;
 const OPTIONS = { ttlMs: 300_000, maxAttempts: 3 };
 const WALLET = '0xab12ab12ab12ab12ab12ab12ab12ab12ab12ab12';
 const PHONE = '+919876543210';
+const DEVICE = 'a3f1'.repeat(16);
 
 function createSender(): OtpSender & { sent: string[] } {
   const sent: string[] = [];
@@ -71,7 +73,7 @@ describe('OtpService', () => {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
 
-      const challengeId = await service.start(WALLET, PHONE, 71);
+      const challengeId = await service.start(WALLET, PHONE, 71, DEVICE);
 
       const [code] = sender.sent;
       expect(code).toMatch(/^\d{6}$/);
@@ -85,7 +87,7 @@ describe('OtpService', () => {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
 
-      const challengeId = await service.start(WALLET, null, 71);
+      const challengeId = await service.start(WALLET, null, 71, DEVICE);
 
       expect(challenges.has(challengeId)).toBe(true);
       expect(sender.sent).toEqual([]);
@@ -100,7 +102,7 @@ describe('OtpService', () => {
         },
       });
 
-      await expect(service.start(WALLET, PHONE, 71)).resolves.toMatch(/^[0-9a-f-]+$/);
+      await expect(service.start(WALLET, PHONE, 71, DEVICE)).resolves.toMatch(/^[0-9a-f-]+$/);
     });
   });
 
@@ -108,7 +110,7 @@ describe('OtpService', () => {
     async function startChallenge(): Promise<{ service: OtpService; challengeId: string; code: string }> {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
-      const challengeId = await service.start(WALLET, PHONE, 71);
+      const challengeId = await service.start(WALLET, PHONE, 71, DEVICE);
       return { service, challengeId, code: sender.sent[0] };
     }
 
@@ -119,6 +121,7 @@ describe('OtpService', () => {
         status: 'verified',
         walletAddress: WALLET,
         trustScore: 71,
+        deviceFingerprint: DEVICE,
       });
     });
 
