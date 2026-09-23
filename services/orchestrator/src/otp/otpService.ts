@@ -15,7 +15,14 @@ export type OtpVerification =
   | { status: 'expired' }
   | { status: 'unknown' };
 
+// 'sms' is a real provider, 'demo-log' writes the code to the service log for a
+// demonstration, and 'none' means the code reaches nobody. The screen that asks
+// for the code says which one is in use, so nobody is told an SMS was sent when
+// none was.
+export type OtpDeliveryChannel = 'sms' | 'demo-log' | 'none';
+
 export interface OtpSender {
+  readonly channel: OtpDeliveryChannel;
   send(phoneNumber: string, code: string): Promise<void>;
 }
 
@@ -37,6 +44,10 @@ export class OtpService {
     private readonly options: OtpOptions,
     private readonly sender: OtpSender,
   ) {}
+
+  get deliveryChannel(): OtpDeliveryChannel {
+    return this.sender.channel;
+  }
 
   async start(
     walletAddress: string,

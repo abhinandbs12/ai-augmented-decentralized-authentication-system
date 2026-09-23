@@ -1,5 +1,9 @@
 export type Decision = 'allow' | 'otp_required' | 'blocked';
 
+// How the step-up code reaches the customer. 'demo-log' means no SMS provider
+// is configured and the code is written to the orchestrator's log instead.
+export type OtpDelivery = 'sms' | 'demo-log' | 'none';
+
 export interface LoginAttempt {
   event_id: string;
   wallet_address: string;

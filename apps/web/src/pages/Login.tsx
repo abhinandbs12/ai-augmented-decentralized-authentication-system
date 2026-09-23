@@ -3,6 +3,7 @@ import { Card, Steps, type StepState } from '../components/CustomerFrame';
 import { Button, Notice, shortWallet } from '../components/ui';
 import { ApiError, deviceFingerprint, postJson, signNonce } from '../lib/api';
 import type { Session } from '../lib/session';
+import type { OtpDelivery } from '../lib/types';
 
 export interface LoginResponse {
   decision: 'allow' | 'otp_required' | 'blocked';
@@ -10,6 +11,7 @@ export interface LoginResponse {
   factors?: string[];
   nonce?: string;
   otp_challenge_id?: string;
+  otp_delivery?: OtpDelivery;
   request_id?: string;
 }
 
@@ -22,7 +24,12 @@ interface VerifyResponse {
 interface LoginProps {
   walletAddress: string;
   onSignedIn: (session: Session) => void;
-  onCodeRequired: (challenge: { otpChallengeId: string; trustScore: number; factors: string[] }) => void;
+  onCodeRequired: (challenge: {
+    otpChallengeId: string;
+    trustScore: number;
+    factors: string[];
+    delivery: OtpDelivery;
+  }) => void;
   onRestart: () => void;
 }
 
@@ -67,6 +74,7 @@ export default function Login({ walletAddress, onSignedIn, onCodeRequired, onRes
             otpChallengeId: login.otp_challenge_id,
             trustScore: login.trust_score ?? 0,
             factors: login.factors ?? [],
+            delivery: login.otp_delivery ?? 'sms',
           });
           return;
         }

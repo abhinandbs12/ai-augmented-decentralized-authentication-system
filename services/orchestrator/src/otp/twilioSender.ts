@@ -9,6 +9,7 @@ const TWILIO_TIMEOUT_MS = 5000;
 export function createTwilioSender(config: TwilioConfig | null): OtpSender {
   if (config === null) {
     return {
+      channel: 'none',
       async send(): Promise<void> {
         throw new Error('Twilio is not configured (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)');
       },
@@ -19,6 +20,7 @@ export function createTwilioSender(config: TwilioConfig | null): OtpSender {
   const credentials = Buffer.from(`${config.accountSid}:${config.authToken}`).toString('base64');
 
   return {
+    channel: 'sms',
     async send(phoneNumber: string, code: string): Promise<void> {
       const response = await fetch(endpoint, {
         method: 'POST',

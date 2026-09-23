@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CustomerFrame } from './components/CustomerFrame';
 import { getJson, postJson } from './lib/api';
 import { loadSession, saveSession, type Session } from './lib/session';
+import type { OtpDelivery } from './lib/types';
 import Account from './pages/Account';
 import Console from './pages/admin/Console';
 import Login from './pages/Login';
@@ -11,7 +12,7 @@ import Vault from './pages/Vault';
 type Screen =
   | { name: 'welcome' }
   | { name: 'signing'; wallet: string; attempt: number }
-  | { name: 'code'; wallet: string; otpChallengeId: string; factors: string[] }
+  | { name: 'code'; wallet: string; otpChallengeId: string; factors: string[]; delivery: OtpDelivery }
   | { name: 'account' }
   | { name: 'console' };
 
@@ -48,8 +49,14 @@ export default function App() {
   }, []);
 
   const codeRequired = useCallback(
-    (wallet: string) => (challenge: { otpChallengeId: string; factors: string[] }) =>
-      setScreen({ name: 'code', wallet, otpChallengeId: challenge.otpChallengeId, factors: challenge.factors }),
+    (wallet: string) => (challenge: { otpChallengeId: string; factors: string[]; delivery: OtpDelivery }) =>
+      setScreen({
+        name: 'code',
+        wallet,
+        otpChallengeId: challenge.otpChallengeId,
+        factors: challenge.factors,
+        delivery: challenge.delivery,
+      }),
     [],
   );
 
@@ -85,6 +92,7 @@ export default function App() {
           walletAddress={screen.wallet}
           otpChallengeId={screen.otpChallengeId}
           factors={screen.factors}
+          delivery={screen.delivery}
           onSignedIn={signedIn}
           onRestart={restart}
         />

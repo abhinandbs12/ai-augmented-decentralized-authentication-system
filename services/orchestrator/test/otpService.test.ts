@@ -59,7 +59,7 @@ const ATTEMPT = { trustScore: 71, deviceFingerprint: DEVICE, factors: ['unrecogn
 
 function createSender(): OtpSender & { sent: string[] } {
   const sent: string[] = [];
-  return { sent, send: async (_phone, code) => void sent.push(code) };
+  return { sent, channel: 'sms', send: async (_phone, code) => void sent.push(code) };
 }
 
 describe('OtpService', () => {
@@ -99,6 +99,7 @@ describe('OtpService', () => {
     // simply cannot continue without the code.
     it('does not fail the request when delivery fails', async () => {
       const service = new OtpService(pool, OPTIONS, {
+        channel: 'sms',
         send: async () => {
           throw new Error('Twilio returned HTTP 500');
         },

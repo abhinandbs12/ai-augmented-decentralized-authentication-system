@@ -247,7 +247,7 @@ function createTestApp(): TestContext {
     sessions,
     sessionCache,
     nonces: new NonceService(pool, 5 * 60_000),
-    otp: new OtpService(pool, { ttlMs: 5 * 60_000, maxAttempts: 3 }, { send: async () => undefined }),
+    otp: new OtpService(pool, { ttlMs: 5 * 60_000, maxAttempts: 3 }, { channel: 'sms', send: async () => undefined }),
     chain,
     riskEngine,
     events,

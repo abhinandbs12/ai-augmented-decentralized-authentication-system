@@ -13,7 +13,7 @@ import { SessionStore } from './core/sessions';
 import { createPool, runMigrations } from './db/pool';
 import { LRUCache } from './ds/lruCache';
 import { OtpService } from './otp/otpService';
-import { createTwilioSender } from './otp/twilioSender';
+import { createOtpSender } from './otp/sender';
 import { createRealtime, silentRealtime, type Realtime } from './realtime/socket';
 
 async function start(): Promise<void> {
@@ -69,7 +69,7 @@ async function start(): Promise<void> {
     otp: new OtpService(
       pool,
       { ttlMs: config.otpTtlMs, maxAttempts: config.otpMaxAttempts },
-      createTwilioSender(config.twilio),
+      createOtpSender({ twilio: config.twilio, demoDelivery: config.otpDemoDelivery }),
     ),
     chain,
     riskEngine: createRiskEngineClient(config.riskEngineUrl),
@@ -92,7 +92,12 @@ async function start(): Promise<void> {
     console.log(`  Risk engine:  ${config.riskEngineUrl}`);
     console.log(`  Contract:     ${config.contractAddress || 'not configured'}`);
     console.log(`  Admin wallets: ${config.adminWallets.length}`);
-    console.log(`  SMS delivery: ${config.twilio ? 'Twilio' : 'not configured'}`);
+    console.log(
+      `  SMS delivery: ${
+        config.twilio ? 'Twilio' : config.otpDemoDelivery ? 'demo, codes written to this log' : 'not configured'
+      }`,
+    );
+    void warnIfContractMissing(config.rpcUrl, config.contractAddress);
   });
 
   const shutdown = async (): Promise<void> => {
@@ -106,6 +111,41 @@ async function start(): Promise<void> {
 
   process.on('SIGTERM', () => void shutdown());
   process.on('SIGINT', () => void shutdown());
+}
+
+// Restarting the chain without restarting this service leaves the address we
+// were given pointing at nothing, and every chain call then fails with the same
+// unhelpful "blockchain could not be reached". Saying so once at start-up turns
+// that into something an operator can act on.
+async function warnIfContractMissing(rpcUrl: string, contractAddress: string): Promise<void> {
+  if (!rpcUrl || !contractAddress) {
+    return;
+  }
+
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getCode',
+        params: [contractAddress, 'latest'],
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    const body = (await response.json()) as { result?: string };
+
+    if (body.result === '0x') {
+      console.warn(
+        `WARNING: no contract is deployed at ${contractAddress} on ${rpcUrl}. ` +
+          'The chain was probably restarted after this service started. ' +
+          'Restart the stack with `docker compose up -d --force-recreate orchestrator` to pick up the new address.',
+      );
+    }
+  } catch {
+    console.warn(`WARNING: could not check the contract at ${contractAddress}; ${rpcUrl} did not answer.`);
+  }
 }
 
 start().catch((error: Error) => {

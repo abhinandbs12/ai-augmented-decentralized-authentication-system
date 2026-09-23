@@ -60,7 +60,7 @@ export default function Account({ session, isAdmin, onSignOut, onOpenConsole }: 
       </div>
       <p className="mt-4 text-sm text-ink-2">
         {session.path === 'code'
-          ? 'Because of the items marked above, we asked for an SMS code before your wallet approval.'
+          ? 'Because of the items marked above, we asked for a one-time code before your wallet approval.'
           : 'Everything matched, so your wallet approval was all we needed.'}{' '}
         The bank's security ledger confirmed your approval. This session ends at {endsAt}.
       </p>

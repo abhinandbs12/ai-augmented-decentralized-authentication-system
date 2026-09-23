@@ -20,7 +20,12 @@ import { internalHeaders } from "../internalToken";
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
 const ATTACKER_IP = "203.0.113.50";
 const ATTACKER_DEVICE = deviceFingerprint("credential_stuffing_rig");
-const TOTAL_ATTEMPTS = 60;
+// The first few attempts from the attacking address score 50 (new device, new
+// region) and are only routed to the code step; the velocity penalty applies
+// once that address passes VELOCITY_THRESHOLD, and those attempts score 25 and
+// are blocked. More than 50 blocked attempts inside the window trip the
+// breaker, so the total is kept well clear of that boundary.
+const TOTAL_ATTEMPTS = 80;
 
 async function main() {
   console.log("━━━ S5: Credential-stuffing attack trips the circuit breaker ━━━\n");

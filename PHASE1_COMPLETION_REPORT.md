@@ -28,13 +28,13 @@ shown live: it needs Twilio credentials.
 |---|---|---|
 | `contracts/` | `AuthRegistry.sol`, Hardhat config, deploy script | 21 Hardhat tests |
 | `services/gateway/` | Express gateway: token bucket, zod validation, request ids, proxy | 60 Vitest tests |
-| `services/orchestrator/` | Express orchestrator: login state machine, sessions, nonces, OTP, chain client, Merkle batcher, circuit breaker, Socket.IO, SQL migrations | 162 Vitest tests |
+| `services/orchestrator/` | Express orchestrator: login state machine, sessions, nonces, OTP, chain client, Merkle batcher, circuit breaker, Socket.IO, SQL migrations | 165 Vitest tests |
 | `services/risk-engine/` | FastAPI: rule scorer, feature extraction, threat graph and bounded BFS | 61 pytest tests |
 | `apps/web/` | React 19 + Vite + Tailwind 4: customer screens and operations console | type-checked, built |
 | `scripts/` | Seeder, scenarios S1–S6, `trust-device` demo helper | type-checked, run live |
 | `docker-compose.yml` | Hardhat, contract deploy, Postgres, MongoDB, risk engine, orchestrator, gateway | started from clean |
 
-**304 automated tests, all passing.**
+**307 automated tests, all passing.**
 
 ## 3. Architecture
 
@@ -84,7 +84,7 @@ are local only (git-ignored) and were not changed.
 | Smart contract | `AuthRegistry.sol` | Yes | 21 Hardhat tests, live |
 | Basic dashboard table | Operations console | Yes | Browser |
 | Gateway rate limiting | `tokenBucket.ts` | Yes | Live 429 on the 11th request |
-| OTP step-up (Twilio direct) | `otpService.ts`, `twilioSender.ts` | Partly: delivery needs credentials | Unit + E2E via the stored hash |
+| OTP step-up (Twilio direct) | `otpService.ts`, `twilioSender.ts`, `sender.ts` | Partly: SMS delivery needs credentials, demo delivery works | Live browser run, 9/9 API checks |
 | Circuit breaker | Contract pause + `circuitBreaker.ts` | Yes | S5 live: 60 blocked in 1.5 s → paused |
 | Sessions + logout | `SessionStore` (LRU + Postgres) | Yes | E2E |
 | Socket.IO stream | `realtime/socket.ts` | Yes | Console live pill, row updates |
@@ -121,6 +121,10 @@ are local only (git-ignored) and were not changed.
 
 | Bug | Severity | Fix |
 |---|---|---|
+| Step-up route impossible to finish without Twilio: the code reached nobody | HIGH | Opt-in demo delivery writes it to the service log; off by default |
+| Every `docker compose up` redeployed the contract, stranding registered users | HIGH | Deployment reuses the recorded address when it still holds code |
+| A chain restart left the orchestrator on a dead address, failing silently | MEDIUM | Start-up warning naming the address and the fix |
+| The code screen claimed an SMS had been sent when none had | MEDIUM | The route reports the delivery channel and the screen says which |
 | Old signature valid again after a newer login | CRITICAL | Nonce mapping per wallet and nonce |
 | `registerUser()` registered the admin, not the customer | CRITICAL | Wallet parameter, admin-only |
 | Anyone could forge login history through `/event` | CRITICAL | Shared token, constant-time compare |
@@ -181,7 +185,7 @@ them.
 | Check | Result |
 |---|---|
 | Gateway (Vitest) | PASS, 60 |
-| Orchestrator (Vitest) | PASS, 162 |
+| Orchestrator (Vitest) | PASS, 165 |
 | Risk engine (pytest) | PASS, 61 |
 | Contracts (Hardhat) | PASS, 21 |
 | Type-checks: gateway, orchestrator, web, scripts | PASS |
@@ -192,6 +196,7 @@ them.
 | Scenarios S1–S6 | PASS |
 | Browser: registration, SMS-code step, signature, console, audit verify and tamper | PASS (MetaMask stood in for by a script that forwards to the Hardhat node's accounts) |
 | Rate limiting | PASS, 429 on the 11th request |
+| Step-up route end to end through the gateway | PASS, 9 of 9 checks |
 | SMS delivery through Twilio | BLOCKED, no credentials |
 | Real MetaMask extension | NOT RUN in this environment |
 
@@ -253,12 +258,24 @@ relevant tests fail.
 
 ## 19. Remaining issues
 
-- SMS delivery needs Twilio trial credentials in `.env`.
+- SMS delivery needs Twilio trial credentials in `.env`. Without them the demo
+  stack writes the code to the orchestrator's log (`OTP_DEMO_DELIVERY`, set only
+  by `docker-compose.dev.yml`), and the code screen says so. Nothing else about
+  the step changes: the code is random, stored only as a SHA-256 hash, expires
+  in five minutes, allows three attempts, and is never returned by the API.
 - The real MetaMask extension was not exercised here; the same message-signing
   call was, through the Hardhat node.
-- Velocity counts every attempt from one address, and all browser traffic in a
-  local demo arrives from one address. Five sign-ins in five minutes step the
-  next one up. This is correct behaviour but must be planned around in a demo.
+- Velocity counts every attempt from one address, and in the lab the browser,
+  the seeder and the scripts all arrive from the one Docker address. The demo
+  overlay raises `VELOCITY_THRESHOLD` from 5 to 10 so ordinary demonstration
+  clicking is not penalised; `docker-compose.yml` keeps the documented 5. Past
+  ten attempts in five minutes the penalty still applies, which is correct
+  behaviour but must be planned around.
+- A blocked attempt flags its wallet, and because every local client shares one
+  address the fraud graph can then link the demo wallet to that flag. Running
+  scenario S3 or S4 before the customer steps can therefore block a sign-in that
+  should have been routed to the code step. The demo order in the guide avoids
+  this; reset with `docker compose down -v` between rehearsals.
 - TRD endpoints `GET /api/risk/score/:wallet` and `GET /api/graph/threat` do
   not exist. The threat graph view is Phase 2.
 

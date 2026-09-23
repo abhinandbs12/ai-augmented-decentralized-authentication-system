@@ -173,6 +173,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
           trust_score: result.trustScore,
           factors: result.reasons,
           otp_challenge_id: result.otpChallengeId,
+          otp_delivery: deps.otp.deliveryChannel,
         });
         return;
       }

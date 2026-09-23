@@ -4,12 +4,14 @@ import { Button, Notice } from '../components/ui';
 import { ApiError, postJson } from '../lib/api';
 import { describeFactor } from '../lib/factors';
 import type { Session } from '../lib/session';
+import type { OtpDelivery } from '../lib/types';
 import { completeWithSignature, describeFailure } from './Login';
 
 interface OtpProps {
   walletAddress: string;
   otpChallengeId: string;
   factors: string[];
+  delivery: OtpDelivery;
   onSignedIn: (session: Session) => void;
   onRestart: () => void;
 }
@@ -22,7 +24,14 @@ interface CodeFailure {
 }
 
 // The middle band: a code by SMS first, and only then the wallet signature.
-export default function Otp({ walletAddress, otpChallengeId, factors, onSignedIn, onRestart }: OtpProps) {
+export default function Otp({
+  walletAddress,
+  otpChallengeId,
+  factors,
+  delivery,
+  onSignedIn,
+  onRestart,
+}: OtpProps) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [signing, setSigning] = useState(false);
@@ -52,8 +61,25 @@ export default function Otp({ walletAddress, otpChallengeId, factors, onSignedIn
     <Card>
       <h1 className="text-xl font-semibold tracking-tight text-ink">One more check</h1>
       <p className="mt-2 text-sm text-ink-2">
-        We have sent a 6-digit code to your registered mobile number. It expires in 5 minutes.
+        {delivery === 'sms'
+          ? 'We have sent a 6-digit code to your registered mobile number. It expires in 5 minutes.'
+          : 'A 6-digit code has been issued for this sign-in. It expires in 5 minutes.'}
       </p>
+
+      {delivery !== 'sms' && (
+        <div className="mt-4">
+          <Notice tone="warning" title="No SMS provider is configured">
+            {delivery === 'demo-log' ? (
+              <>
+                This is a demonstration, so the code was written to the orchestrator's log instead of being sent by
+                text message. Read it with <code className="font-mono">docker compose logs orchestrator</code>.
+              </>
+            ) : (
+              'The code cannot be delivered, so this sign-in cannot be completed. Configure Twilio, or set OTP_DEMO_DELIVERY=true for a demonstration.'
+            )}
+          </Notice>
+        </div>
+      )}
 
       {factors.length > 0 && (
         <div className="mt-4 rounded-lg bg-sunken p-3 text-sm text-ink-2">

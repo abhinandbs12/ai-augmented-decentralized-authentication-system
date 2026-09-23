@@ -118,9 +118,17 @@ the demo scripts.
    location.
 4. **Input:** `000000`, then **Verify code**.
 5. **Result:** "That code is not correct. You have 2 tries left."
-6. **Proves:** score before challenge; the OTP step (6 digits, 5 minutes, three
-   attempts, stored only as a hash, destroyed after the third failure). Say
-   plainly that no SMS provider is configured in the lab.
+6. **Read the real code.** The screen says plainly that no SMS provider is
+   configured and that the code went to the service log. In a terminal:
+   ```bash
+   docker compose logs orchestrator | grep "DEMO DELIVERY" | tail -1
+   ```
+   Enter those six digits and choose **Verify code**. The wallet is asked to
+   approve, and the sign-in completes.
+7. **Proves:** score before challenge; the OTP step (6 digits, 5 minutes, three
+   attempts, stored only as a SHA-256 hash, destroyed after the third failure).
+   The code is never returned by the API and never stored in plain text: demo
+   delivery only writes it to the log, and `OTP_DEMO_DELIVERY` turns that off.
 
 ### Step 3: A familiar device goes straight to the signature (1 minute)
 
@@ -213,11 +221,18 @@ TC-02). Close with the Phase 2 list in the completion report.
 
 ## G. What could go wrong
 
-- **Velocity:** five or more attempts from the demo machine within five minutes
-  push every attempt into the SMS-code band. Keep live sign-ins to the ones in
-  this guide and do the preparation five minutes early.
-- **No SMS:** without Twilio credentials no code is delivered. The code step is
-  shown with a wrong code only.
+- **Velocity:** the rule counts attempts per source address, and in the lab the
+  browser, the seeder and every script reach the gateway from the one Docker
+  address. `docker-compose.dev.yml` therefore raises `VELOCITY_THRESHOLD` from
+  the documented 5 to 10 for the demo stack, which leaves room for a
+  demonstration while still catching S5. Even so, keep live sign-ins to the ones
+  in this guide: past ten attempts in five minutes, every sign-in loses 25
+  points and can drop below the blocking line.
+- **No SMS:** no Twilio credentials are configured, so nothing is sent by text
+  message. `docker-compose.dev.yml` sets `OTP_DEMO_DELIVERY=true`, which writes
+  the code to the orchestrator's log for the demonstration; the code screen says
+  so on screen. `docker-compose.yml` on its own writes no code anywhere, and the
+  step-up route then cannot be completed by hand.
 - **Off-hours:** the seeded history is stamped at the hour you run `npm run seed`.
   A sign-in far outside that hour loses 10 points as "unusual time of day", which
   can move Step 2 from the SMS-code band to blocked. Seed on the day, during the
@@ -225,8 +240,11 @@ TC-02). Close with the Phase 2 list in the completion report.
 - **Sealing delay:** a record appears in the audit trail up to 60 seconds after
   the sign-in. Do Step 6 last, or wait.
 - **Chain reset:** restarting the `hardhat` container clears on-chain
-  registrations while Postgres keeps the profiles. Reset the whole stack with
-  `docker compose down -v`, never the chain alone.
+  registrations while PostgreSQL keeps the profiles. Reset the whole stack with
+  `docker compose down -v`, never the chain alone. If the chain is restarted on
+  its own, the orchestrator prints a warning that no contract is deployed at the
+  address it holds; recreate it with
+  `docker compose up -d --force-recreate orchestrator`.
 - **MetaMask network:** if MetaMask is on another network, the signature still
   works (it is a plain message signature), but select "Hardhat local" to avoid
   confusion.

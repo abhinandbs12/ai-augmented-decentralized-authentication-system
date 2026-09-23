@@ -16,6 +16,7 @@ export interface OrchestratorConfig {
   contractAddress: string;
   adminPrivateKey: string;
   twilio: TwilioConfig | null;
+  otpDemoDelivery: boolean;
   merkleBatchSize: number;
   merkleBatchIntervalMs: number;
   breakerThreshold: number;
@@ -63,6 +64,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
     contractAddress: readContractAddress(env),
     adminPrivateKey: readOptional(env, 'ADMIN_PRIVATE_KEY'),
     twilio: readTwilio(env),
+    otpDemoDelivery: readOptional(env, 'OTP_DEMO_DELIVERY').toLowerCase() === 'true',
     merkleBatchSize: readPositiveInteger(env, 'MERKLE_BATCH_SIZE', DEFAULTS.merkleBatchSize),
     merkleBatchIntervalMs: readPositiveInteger(env, 'MERKLE_BATCH_MS', DEFAULTS.merkleBatchIntervalMs),
     breakerThreshold: readPositiveInteger(env, 'BREAKER_THRESHOLD', DEFAULTS.breakerThreshold),

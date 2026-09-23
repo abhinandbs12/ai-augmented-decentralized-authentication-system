@@ -724,6 +724,11 @@ cd ai-augmented-decentralized-authentication-system
 cp .env.example .env
 # Set ADMIN_WALLETS and INTERNAL_API_TOKEN. Twilio values are only needed to
 # deliver the SMS code; everything else has a working default.
+#
+# Without Twilio the step-up code reaches nobody, so plain `docker compose up`
+# cannot finish that route by hand. The development overlay below sets
+# OTP_DEMO_DELIVERY=true, which writes the code to the orchestrator's log for a
+# demonstration. It is off by default and should stay off anywhere else.
 
 # 3. Build and start the whole stack
 docker compose build
@@ -792,7 +797,7 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 | Suite | Count | Command | Coverage |
 |-------|-------|---------|----------|
 | Gateway | 60 | `cd services/gateway && npm test` | Token bucket refill and capacity, request validation, proxy behaviour, error envelope |
-| Orchestrator | 162 | `cd services/orchestrator && npm test` | Login routes end to end, LRU cache, sessions, OTP lifecycle, Merkle tree and proofs, circuit breaker, configuration |
+| Orchestrator | 165 | `cd services/orchestrator && npm test` | Login routes end to end, LRU cache, sessions, OTP lifecycle, Merkle tree and proofs, circuit breaker, OTP delivery, configuration |
 | Risk engine | 61 | `cd services/risk-engine && python -m pytest tests/` | Scoring rules, bounded BFS, feature extraction, the `/score` and `/event` endpoints |
 | Contracts | 21 | `cd contracts && npx hardhat test` | Registration, signature verification, replay rejection, pause and resume, Merkle anchoring |
 
