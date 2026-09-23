@@ -20,9 +20,11 @@ def is_unrecognized_device(
     """
     Check if this device fingerprint has been seen before for this wallet.
 
-    Queries the login_events collection for any past SUCCESSFUL login
-    from this wallet using this device fingerprint. If none found,
-    the device is unrecognized → penalty of -30 in the scorer.
+    Queries the login_events collection for any past COMPLETED login
+    from this wallet using this device fingerprint. Only logins whose
+    signature was verified count: otherwise an attacker could make an
+    unfamiliar device look familiar simply by trying again. If none
+    found, the device is unrecognized → penalty of -30 in the scorer.
 
     Args:
         wallet: The wallet address attempting to log in.
@@ -35,7 +37,7 @@ def is_unrecognized_device(
     existing = login_events_col.find_one({
         "wallet_address": wallet,
         "device_fingerprint": device_fingerprint,
-        "decision": {"$in": ["allow", "otp_required"]},
+        "verified": True,
     })
     return existing is None
 
@@ -46,7 +48,7 @@ def is_unrecognized_region(
     """
     Check if this IP address / region is new for this wallet.
 
-    Queries the login_events collection for any past successful login
+    Queries the login_events collection for any past completed login
     from this wallet using this IP. If none found, the region is
     unrecognized → penalty of -20 in the scorer.
 
@@ -61,7 +63,7 @@ def is_unrecognized_region(
     existing = login_events_col.find_one({
         "wallet_address": wallet,
         "ip_address": ip_address,
-        "decision": {"$in": ["allow", "otp_required"]},
+        "verified": True,
     })
     return existing is None
 
@@ -72,7 +74,7 @@ def is_off_hours(
     """
     Check if the login timestamp is outside the user's typical login hours.
 
-    Computes the user's typical login-hour range from their past successful
+    Computes the user's typical login-hour range from their past completed
     logins. If fewer than 3 past logins exist, we cannot establish a pattern
     and return False (benefit of the doubt). Otherwise, if the current hour
     falls outside the [min_hour - 2, max_hour + 2] range of their history,
@@ -86,11 +88,11 @@ def is_off_hours(
     Returns:
         True if the login is at an unusual hour for this user.
     """
-    # Get past successful logins for this wallet
+    # Get past completed logins for this wallet
     past_logins = list(login_events_col.find(
         {
             "wallet_address": wallet,
-            "decision": {"$in": ["allow", "otp_required"]},
+            "verified": True,
         },
         {"timestamp": 1},
     ).sort("timestamp", -1).limit(50))

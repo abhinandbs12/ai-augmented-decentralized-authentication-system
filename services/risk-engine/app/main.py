@@ -9,12 +9,13 @@ Owner: Abhinand Baiju Smitha
 See docs/Abhinand_Task_Plan.md for full specification.
 """
 
+import hmac
 import os
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 
@@ -183,33 +184,67 @@ class LoginEvent(BaseModel):
     decision: str = Field(..., description="Final decision: allow, otp_required, blocked")
     timestamp: datetime = Field(..., description="Timestamp of the login attempt")
     event_id: str | None = Field(None, description="Event ID for Merkle batching")
+    verified: bool = Field(
+        False,
+        description="True only once the signature was verified on-chain; "
+                    "only these attempts count as trusted history",
+    )
+
+
+def _require_internal_token(presented_token: str | None) -> None:
+    """
+    Only the orchestrator (and the local demo scripts) may write login history.
+
+    Without this check, anyone able to reach the service could invent a history
+    of successful logins for a wallet and turn an unfamiliar device into a
+    familiar one, or frame an innocent wallet as a fraud ring member.
+    """
+    expected_token = os.getenv("INTERNAL_API_TOKEN", "")
+    if not expected_token:
+        logger.error("INTERNAL_API_TOKEN is not set; refusing to record events")
+        raise HTTPException(status_code=503, detail="Event recording is not configured")
+
+    if not presented_token or not hmac.compare_digest(presented_token, expected_token):
+        raise HTTPException(status_code=401, detail="Invalid internal token")
 
 
 @app.post("/event")
-async def record_event(event: LoginEvent):
+async def record_event(
+    event: LoginEvent,
+    x_internal_token: str | None = Header(default=None),
+):
     """
-    Record a completed login event into MongoDB.
+    Record a login event into MongoDB.
 
-    Called by the orchestrator AFTER the login flow finishes (signature verified,
-    OTP completed, or attempt blocked). This keeps login_events in sync for
-    future feature extraction without the risk engine writing during scoring.
+    The orchestrator calls this once the routing decision is made, and again
+    with verified=True once the signature has been checked on-chain. Both calls
+    carry the same event_id, so the second updates the first.
     """
+    _require_internal_token(x_internal_token)
+
     if db is None or threat_graph is None:
         raise HTTPException(status_code=503, detail="Risk engine not initialized")
 
     login_events = db.get_collection("login_events")
-    region = lookup_region(event.ip_address)
-
-    login_events.insert_one({
+    document = {
         "wallet_address": event.wallet_address,
         "ip_address": event.ip_address,
         "device_fingerprint": event.device_fingerprint,
         "trust_score": event.trust_score,
         "decision": event.decision,
         "timestamp": event.timestamp,
-        "region": region,
-        "event_id": event.event_id,
-    })
+        "region": lookup_region(event.ip_address),
+        "verified": event.verified,
+    }
+
+    if event.event_id:
+        login_events.update_one(
+            {"event_id": event.event_id},
+            {"$set": document, "$setOnInsert": {"event_id": event.event_id}},
+            upsert=True,
+        )
+    else:
+        login_events.insert_one({**document, "event_id": None})
 
     # Auto-flag bad actors (TRD §9.5)
     if event.decision == "blocked":

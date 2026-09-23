@@ -5,6 +5,8 @@
  * Ref: PRD §3.3, scenario S3
  */
 
+import { internalHeaders } from "../internalToken";
+
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
 async function main() {
@@ -30,7 +32,7 @@ async function main() {
     // 2. Simulate Orchestrator reporting the completed event
     await fetch(`${RISK_ENGINE_URL}/event`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalHeaders(),
       body: JSON.stringify({
         wallet_address: payload.wallet,
         ip_address: payload.ip_address,

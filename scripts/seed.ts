@@ -17,6 +17,8 @@
  * Ref: docs/Abhinand_Task_Plan.md — scripts/seed.ts section
  */
 
+import { internalHeaders } from "./internalToken";
+
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
@@ -82,10 +84,14 @@ const FRAUD_RING = {
   ],
 };
 
-async function postJSON(url: string, body: object): Promise<any> {
+async function postJSON(
+  url: string,
+  body: object,
+  headers: Record<string, string> = { "Content-Type": "application/json" }
+): Promise<any> {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -119,7 +125,9 @@ async function seedNormalCustomers() {
           trust_score: 100,
           decision: "allow",
           timestamp: ts,
-        });
+          // A completed login: this is what makes the device and IP familiar.
+          verified: true,
+        }, internalHeaders());
       } catch (e: any) {
         // Silently continue — risk engine may not be up
       }
@@ -155,7 +163,7 @@ async function seedFraudRing() {
           trust_score: 35,
           decision: "blocked",
           timestamp: ts,
-        });
+        }, internalHeaders());
       } catch (e: any) {
         // Silently continue
       }

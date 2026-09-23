@@ -9,6 +9,8 @@
  * Ref: PRD §3.3, scenario S5
  */
 
+import { internalHeaders } from "../internalToken";
+
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
 async function main() {
@@ -41,7 +43,7 @@ async function main() {
       
       await fetch(`${RISK_ENGINE_URL}/event`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalHeaders(),
         body: JSON.stringify({
           wallet_address: payload.wallet,
           ip_address: payload.ip_address,
