@@ -15,7 +15,9 @@ contract AuthRegistry {
     address public admin;
     bool public paused;
     mapping(address => bool) public isRegistered;
-    mapping(address => bytes32) public usedNonces;
+    // wallet => nonce => consumed. Every nonce a wallet has used is remembered,
+    // so an old signature cannot become valid again after a newer login.
+    mapping(address => mapping(bytes32 => bool)) public usedNonces;
     bytes32[] public merkleRoots;
 
     event UserRegistered(address indexed wallet);
@@ -38,10 +40,14 @@ contract AuthRegistry {
         admin = msg.sender;
     }
 
-    function registerUser() external notPaused {
-        require(!isRegistered[msg.sender], "AuthRegistry: already registered");
-        isRegistered[msg.sender] = true;
-        emit UserRegistered(msg.sender);
+    /// @dev The backend registers the customer's wallet, so the address is a
+    /// parameter. Registration alone grants nothing: logging in still needs a
+    /// signature from that wallet's private key.
+    function registerUser(address wallet) external onlyAdmin notPaused {
+        require(wallet != address(0), "AuthRegistry: zero address");
+        require(!isRegistered[wallet], "AuthRegistry: already registered");
+        isRegistered[wallet] = true;
+        emit UserRegistered(wallet);
     }
 
     function verifySignature(
@@ -50,13 +56,13 @@ contract AuthRegistry {
         bytes calldata signature
     ) external notPaused returns (bool) {
         require(isRegistered[wallet], "AuthRegistry: wallet not registered");
-        require(usedNonces[wallet] != nonce, "AuthRegistry: nonce already used");
+        require(!usedNonces[wallet][nonce], "AuthRegistry: nonce already used");
 
         bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(nonce);
         address recovered = ethSignedHash.recover(signature);
         require(recovered == wallet, "AuthRegistry: invalid signature");
 
-        usedNonces[wallet] = nonce;
+        usedNonces[wallet][nonce] = true;
         emit LoginVerified(wallet, block.timestamp);
         return true;
     }
