@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckIcon, CrossIcon } from '../../components/icons';
-import { Button, DecisionBadge, ScoreBadge, SkeletonRows, formatTime, shortWallet } from '../../components/ui';
-import { describeFactor } from '../../lib/factors';
+import { Badge, Button, DecisionBadge, ScoreBadge, SkeletonRows, formatTime, shortWallet } from '../../components/ui';
+import { band, describeFactor } from '../../lib/factors';
 import type { Decision, LoginAttempt } from '../../lib/types';
 import Attempts from './Attempts';
 
@@ -16,6 +16,13 @@ export default function Activity({ attempts, sessionToken }: ActivityProps) {
   const [view, setView] = useState<'latest' | 'riskiest'>('latest');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = attempts?.find((attempt) => attempt.event_id === selectedId) ?? null;
+
+  // Closing the panel hands focus back to the wallet that opened it.
+  function closeDetail() {
+    const id = selectedId;
+    setSelectedId(null);
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`button[data-event-id="${id}"]`)?.focus());
+  }
 
   return (
     <div className="space-y-5">
@@ -49,7 +56,7 @@ export default function Activity({ attempts, sessionToken }: ActivityProps) {
           <RoutingSummary attempts={attempts} />
           <div className={`grid gap-5 ${selected ? 'xl:grid-cols-[minmax(0,1fr)_22rem]' : ''}`}>
             <AttemptTable attempts={attempts} selectedId={selectedId} onSelect={setSelectedId} compact={Boolean(selected)} />
-            {selected && <AttemptDetail attempt={selected} onClose={() => setSelectedId(null)} />}
+            {selected && <AttemptDetail attempt={selected} onClose={closeDetail} />}
           </div>
         </>
       )}
@@ -145,14 +152,17 @@ function AttemptTable({
               <tr
                 key={attempt.event_id}
                 onClick={() => onSelect(attempt.event_id)}
-                aria-selected={attempt.event_id === selectedId}
-                className="cursor-pointer border-b border-line transition-[opacity,translate,background-color] duration-200 ease-(--ease-out) last:border-b-0 hover:bg-canvas aria-selected:bg-accent-soft starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
+                data-selected={attempt.event_id === selectedId}
+                className="cursor-pointer border-b border-line transition-[opacity,translate,background-color] duration-200 ease-(--ease-out) last:border-b-0 hover:bg-canvas data-[selected=true]:bg-accent-soft starting:-translate-y-1 starting:opacity-0 motion-reduce:starting:translate-y-0"
               >
                 <td className="tabular whitespace-nowrap px-4 py-2.5 text-ink-2">{formatTime(attempt.timestamp)}</td>
                 <td className="whitespace-nowrap px-4 py-2.5">
                   <button
                     type="button"
                     aria-label={`Details for ${attempt.wallet_address}`}
+                    aria-expanded={attempt.event_id === selectedId}
+                    aria-controls="attempt-detail"
+                    data-event-id={attempt.event_id}
                     className="tabular font-medium text-ink underline-offset-4 hover:underline"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -201,7 +211,14 @@ function FactorList({ factors }: { factors: string[] }) {
   );
 }
 
+const ROUTE_BAND = { allow: 'allow', otp_required: 'otp', blocked: 'blocked' } as const;
+
+// The route was chosen from the score when the attempt happened. If the stored
+// score now points to a different route, the record was changed afterwards.
+const contradictsRoute = (attempt: LoginAttempt) => band(attempt.trust_score) !== ROUTE_BAND[attempt.decision];
+
 function Outcome({ attempt }: { attempt: LoginAttempt }) {
+  if (contradictsRoute(attempt)) return <Badge tone="danger">Score does not match route</Badge>;
   if (attempt.decision === 'blocked') return <span className="text-ink-3">No challenge issued</span>;
   if (!attempt.verified) return <span className="text-ink-3">Not completed</span>;
   return (
@@ -214,6 +231,16 @@ function Outcome({ attempt }: { attempt: LoginAttempt }) {
 
 // What happened behind the scenes for one attempt, station by station.
 function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: () => void }) {
+  const panel = useRef<HTMLElement>(null);
+
+  // Below the wide layout the panel opens under the table, so bring it into
+  // view and move focus to it; otherwise selecting a wallet seems to do nothing.
+  useEffect(() => {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    panel.current?.focus({ preventScroll: true });
+    panel.current?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [attempt.event_id]);
+
   const factors = attempt.factors ?? [];
   const penalties = factors.map((factor) => describeFactor(factor));
   const arithmetic = Math.max(0, 100 - penalties.reduce((sum, factor) => sum + factor.penalty, 0));
@@ -238,14 +265,19 @@ function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: (
   ];
 
   return (
-    <aside aria-label="Attempt details" className="rounded-xl border border-line bg-surface p-5 text-sm xl:sticky xl:top-4 xl:self-start">
+    <aside
+      id="attempt-detail"
+      ref={panel}
+      tabIndex={-1}
+      aria-label="Attempt details"
+      className="rounded-xl border border-line bg-surface p-5 text-sm xl:sticky xl:top-4 xl:self-start">
       <div className="flex items-start justify-between gap-3">
         <p className="tabular break-all font-mono text-xs font-medium">{attempt.wallet_address}</p>
         <Button variant="ghost" className="-mt-1.5 -mr-2 shrink-0" onClick={onClose} aria-label="Close details">
           <CrossIcon />
         </Button>
       </div>
-      <p className="tabular mt-0.5 text-xs text-ink-3">{new Date(attempt.timestamp).toLocaleString()}</p>
+      <p className="tabular mt-0.5 text-xs text-ink-3">{new Date(attempt.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium', hour12: false })}</p>
 
       <h3 className="mt-5 text-xs font-medium text-ink-3">How the score was reached</h3>
       <div className="tabular mt-2 space-y-1">
@@ -264,12 +296,18 @@ function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: (
           <span>{attempt.trust_score}</span>
         </div>
       </div>
-      {!scoreExplained && (
-        <p className="mt-2 text-xs text-ink-3">
-          {factors.length === 0 && attempt.trust_score === 70
-            ? 'No factors: the risk engine was unreachable, so the attempt was routed to an SMS code (never allowed).'
-            : 'Score as returned by the risk engine.'}
+      {contradictsRoute(attempt) ? (
+        <p className="mt-2 text-xs font-medium text-danger">
+          The stored score no longer matches how this attempt was routed. Check the record in the Audit trail.
         </p>
+      ) : (
+        !scoreExplained && (
+          <p className="mt-2 text-xs text-ink-3">
+            {factors.length === 0 && attempt.trust_score === 70
+              ? 'No factors: the risk engine was unreachable, so the attempt was routed to an SMS code (never allowed).'
+              : 'Score as returned by the risk engine.'}
+          </p>
+        )
       )}
 
       <h3 className="mt-5 text-xs font-medium text-ink-3">How far it got</h3>
@@ -298,7 +336,7 @@ function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: (
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-ink-3">Device</dt>
-          <dd className="tabular">{attempt.device_fingerprint?.slice(0, 16) ?? 'unknown'}…</dd>
+          <dd className="tabular">{attempt.device_fingerprint ? `${attempt.device_fingerprint.slice(0, 16)}…` : 'unknown'}</dd>
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-ink-3">Event</dt>

@@ -37,8 +37,8 @@ export default function Account({ session, isAdmin, onSignOut, onOpenConsole }: 
         </Button>
       </div>
 
-      <div className="mt-6 rounded-lg border border-line">
-        <div className="flex items-baseline justify-between gap-4 border-b border-line px-4 py-3">
+      <div className="-mx-6 mt-6 border-y border-line sm:-mx-8">
+        <div className="flex items-baseline justify-between gap-4 border-b border-line px-6 py-3 sm:px-8">
           <p className="text-sm font-medium text-ink">How this sign-in was checked</p>
           <p className="tabular whitespace-nowrap text-sm text-ink-2">
             Score <span className="font-semibold text-ink">{session.trustScore}</span> / 100
@@ -48,7 +48,7 @@ export default function Account({ session, isAdmin, onSignOut, onOpenConsole }: 
           {CHECKS.map((check) => {
             const flagged = session.factors.includes(check.factor);
             return (
-              <li key={check.factor} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+              <li key={check.factor} className="flex items-center gap-3 px-6 py-2.5 text-sm sm:px-8">
                 {flagged ? <AlertIcon className="shrink-0 text-warning" /> : <CheckIcon className="shrink-0 text-success" />}
                 <span className={flagged ? 'text-ink' : 'text-ink-2'}>
                   {flagged ? describeFactor(check.factor).customer : check.passed}
@@ -57,13 +57,13 @@ export default function Account({ session, isAdmin, onSignOut, onOpenConsole }: 
             );
           })}
         </ul>
-        <p className="border-t border-line bg-sunken px-4 py-3 text-sm text-ink-2">
-          {session.path === 'code'
-            ? 'Because of the items marked above, we asked for an SMS code before your wallet approval.'
-            : 'Everything matched, so your wallet approval was all we needed.'}{' '}
-          The bank's security ledger confirmed your approval. This session ends at {endsAt}.
-        </p>
       </div>
+      <p className="mt-4 text-sm text-ink-2">
+        {session.path === 'code'
+          ? 'Because of the items marked above, we asked for an SMS code before your wallet approval.'
+          : 'Everything matched, so your wallet approval was all we needed.'}{' '}
+        The bank's security ledger confirmed your approval. This session ends at {endsAt}.
+      </p>
 
       {isAdmin && (
         <Button variant="primary" className="mt-6 w-full" onClick={onOpenConsole}>

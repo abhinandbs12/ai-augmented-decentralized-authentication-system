@@ -93,13 +93,13 @@ export default function Audit({ attempts, sessionToken, onChanged }: AuditProps)
           that root.
         </p>
         <div className="relative overflow-x-auto rounded-xl border border-line bg-surface">
-          <table className="w-full min-w-[34rem] text-sm">
+          <table className="w-full text-sm sm:min-w-[34rem]">
             <thead className="border-b border-line bg-sunken text-left text-xs text-ink-3">
               <tr>
-                <th scope="col" className="px-4 py-2.5 font-medium">Time</th>
+                <th scope="col" className="hidden px-4 py-2.5 font-medium sm:table-cell">Time</th>
                 <th scope="col" className="px-4 py-2.5 font-medium">Wallet</th>
                 <th scope="col" className="px-4 py-2.5 font-medium">Stored score</th>
-                <th scope="col" className="px-4 py-2.5 font-medium">Batch</th>
+                <th scope="col" className="hidden px-4 py-2.5 font-medium sm:table-cell">Batch</th>
                 <th scope="col" className="px-4 py-2.5">
                   <span className="sr-only">Action</span>
                 </th>
@@ -118,15 +118,15 @@ export default function Audit({ attempts, sessionToken, onChanged }: AuditProps)
                 sealed.map((attempt) => (
                   <tr
                     key={attempt.event_id}
-                    aria-selected={attempt.event_id === selectedId}
-                    className="border-b border-line last:border-b-0 aria-selected:bg-accent-soft"
+                    data-selected={attempt.event_id === selectedId}
+                    className="border-b border-line last:border-b-0 data-[selected=true]:bg-accent-soft"
                   >
-                    <td className="tabular whitespace-nowrap px-4 py-2.5 text-ink-2">{formatTime(attempt.timestamp)}</td>
+                    <td className="tabular hidden whitespace-nowrap px-4 py-2.5 text-ink-2 sm:table-cell">{formatTime(attempt.timestamp)}</td>
                     <td className="tabular px-4 py-2.5 font-medium">{shortWallet(attempt.wallet_address)}</td>
                     <td className="px-4 py-2.5">
                       <ScoreBadge score={attempt.trust_score} />
                     </td>
-                    <td className="tabular px-4 py-2.5">{attempt.batch_id}</td>
+                    <td className="tabular hidden px-4 py-2.5 sm:table-cell">{attempt.batch_id}</td>
                     <td className="px-4 py-2.5 text-right">
                       <Button
                         busy={busy === 'verify' && selectedId === attempt.event_id}

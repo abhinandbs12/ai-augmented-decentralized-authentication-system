@@ -117,12 +117,14 @@ export default function Control({ status, sessionToken, onChanged }: ControlProp
           >
             <span
               className={`block h-full rounded-full transition-[width] duration-300 ease-(--ease-out) ${
-                fill >= 100 ? 'bg-incident' : fill >= 60 ? 'bg-warning' : 'bg-accent'
+                fill >= 100 ? 'bg-incident' : fill >= 60 ? 'bg-warning' : 'bg-ink-3'
               }`}
               style={{ width: `${fill}%` }}
             />
           </div>
-          <p className="mt-2 text-xs text-ink-3">Run npm run s5 to simulate a credential-stuffing attack and trip it.</p>
+          <p className="mt-2 text-xs text-ink-3">
+            Run <code className="font-mono">npm run s5</code> to simulate a credential-stuffing attack and trip it.
+          </p>
         </div>
       </section>
     </div>

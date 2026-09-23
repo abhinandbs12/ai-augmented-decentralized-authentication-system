@@ -94,13 +94,19 @@ export default function Console({ session, onExit, onSignOut }: ConsoleProps) {
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
       <aside className="border-b border-line bg-surface md:sticky md:top-0 md:flex md:h-dvh md:flex-col md:border-r md:border-b-0">
-        <div className="flex h-14 items-center gap-2 px-4 font-semibold">
-          <span className="grid size-7 place-items-center rounded-md bg-accent text-white">
-            <ShieldIcon />
+        <div className="flex h-14 items-center justify-between gap-2 px-4 font-semibold">
+          <span className="flex items-center gap-2">
+            <span className="grid size-7 place-items-center rounded-md bg-accent text-white">
+              <ShieldIcon />
+            </span>
+            <span>
+              Demo Bank <span className="font-normal text-ink-3">Operations</span>
+            </span>
           </span>
-          <span>
-            Demo Bank <span className="font-normal text-ink-3">Operations</span>
-          </span>
+          <Button variant="ghost" className="md:hidden" onClick={onSignOut}>
+            <LogOutIcon />
+            Sign out
+          </Button>
         </div>
         <nav aria-label="Console sections" className="flex gap-1 overflow-x-auto px-3 pb-3 [scrollbar-width:none] md:flex-col md:pb-0">
           {SECTIONS.map((item) => {
@@ -138,11 +144,8 @@ export default function Console({ session, onExit, onSignOut }: ConsoleProps) {
 
       <main className="min-w-0">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-3 sm:px-6">
-          <h1 className="text-base font-semibold">{current.label}</h1>
+          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">{current.label}</h1>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" className="md:hidden" onClick={onSignOut} aria-label="Sign out">
-              <LogOutIcon />
-            </Button>
             <LivePill state={live} />
             {status && (
               <Badge tone={status.paused ? 'incident' : 'success'}>
