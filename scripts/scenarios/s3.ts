@@ -5,6 +5,12 @@
  * Ref: PRD §3.3, scenario S3
  */
 
+import { internalHeaders } from "../internalToken";
+
+import { FOREIGN_IP, NORMAL_WALLETS, UNKNOWN_DEVICE } from "../demoData";
+
+const CUSTOMER = NORMAL_WALLETS[1];
+
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
 async function main() {
@@ -13,9 +19,9 @@ async function main() {
   // Fire several rapid requests first (to inflate velocity)
   for (let i = 0; i < 6; i++) {
     const payload = {
-      wallet: "0xB2c3D4e5F6a7b8C9d0E1f2A3b4C5d6E7f8A9b0C1",
-      ip_address: "203.0.113.50",  // Unknown foreign IP (Nigeria per geo overrides)
-      device_fingerprint: "dd00ee11ff22aa33bb44cc55dd66ee77ff88aa99bb00cc11dd22ee33ff44aa55",
+      wallet: CUSTOMER.wallet,
+      ip_address: FOREIGN_IP,
+      device_fingerprint: UNKNOWN_DEVICE,
       timestamp: new Date().toISOString(),
     };
     
@@ -30,7 +36,7 @@ async function main() {
     // 2. Simulate Orchestrator reporting the completed event
     await fetch(`${RISK_ENGINE_URL}/event`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalHeaders(),
       body: JSON.stringify({
         wallet_address: payload.wallet,
         ip_address: payload.ip_address,
@@ -47,9 +53,9 @@ async function main() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      wallet: "0xB2c3D4e5F6a7b8C9d0E1f2A3b4C5d6E7f8A9b0C1",
-      ip_address: "203.0.113.50",
-      device_fingerprint: "dd00ee11ff22aa33bb44cc55dd66ee77ff88aa99bb00cc11dd22ee33ff44aa55",
+      wallet: CUSTOMER.wallet,
+      ip_address: FOREIGN_IP,
+      device_fingerprint: UNKNOWN_DEVICE,
       timestamp: new Date().toISOString(),
     }),
   });

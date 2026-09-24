@@ -117,7 +117,8 @@ describe('handleLogin', () => {
       const result = await handleLogin(LOGIN, deps);
 
       expect(result).toEqual({ state: 'CHALLENGE_ISSUED', trustScore: 95, reasons: [], nonce: ISSUED_NONCE });
-      expect(deps.issueNonce).toHaveBeenCalledWith(WALLET);
+      // The score travels with the challenge so the audit event can report it.
+      expect(deps.issueNonce).toHaveBeenCalledWith(WALLET, { trustScore: 95, reasons: [] });
       expect(deps.startOtpChallenge).not.toHaveBeenCalled();
     });
 
@@ -132,7 +133,7 @@ describe('handleLogin', () => {
         reasons: ['unrecognized_device'],
         otpChallengeId: 'otp-challenge-1',
       });
-      expect(deps.startOtpChallenge).toHaveBeenCalledWith(WALLET);
+      expect(deps.startOtpChallenge).toHaveBeenCalledWith(WALLET, { trustScore: 70, reasons: ['unrecognized_device'] });
       expect(deps.issueNonce).not.toHaveBeenCalled();
     });
 

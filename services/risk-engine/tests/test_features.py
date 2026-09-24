@@ -100,6 +100,7 @@ class TestIsUnrecognizedDevice:
                 "wallet_address": "0xABC",
                 "device_fingerprint": "device_known",
                 "decision": "allow",
+                "verified": True,
             },
         ])
         assert is_unrecognized_device("0xABC", "device_known", col) is False
@@ -111,6 +112,7 @@ class TestIsUnrecognizedDevice:
                 "wallet_address": "0xABC",
                 "device_fingerprint": "device_old",
                 "decision": "allow",
+                "verified": True,
             },
         ])
         assert is_unrecognized_device("0xABC", "device_new", col) is True
@@ -120,6 +122,36 @@ class TestIsUnrecognizedDevice:
         col = MockCollection([])
         assert is_unrecognized_device("0xABC", "any_device", col) is True
 
+    def test_device_seen_in_unfinished_attempt(self):
+        """
+        An attempt that only reached the OTP step is not history.
+
+        Without this rule an attacker could retry from a new device: the first
+        attempt would be stored, the second would find it and score the device
+        as familiar, and the OTP step would be skipped.
+        """
+        col = MockCollection([
+            {
+                "wallet_address": "0xABC",
+                "device_fingerprint": "device_new_phone",
+                "decision": "otp_required",
+                "verified": False,
+            },
+        ])
+        assert is_unrecognized_device("0xABC", "device_new_phone", col) is True
+
+    def test_device_known_after_completed_login(self):
+        """The same attempt, once the signature was verified, does count."""
+        col = MockCollection([
+            {
+                "wallet_address": "0xABC",
+                "device_fingerprint": "device_new_phone",
+                "decision": "otp_required",
+                "verified": True,
+            },
+        ])
+        assert is_unrecognized_device("0xABC", "device_new_phone", col) is False
+
     def test_device_seen_but_blocked(self):
         """Device seen only in blocked attempts → still unrecognized."""
         col = MockCollection([
@@ -127,6 +159,7 @@ class TestIsUnrecognizedDevice:
                 "wallet_address": "0xABC",
                 "device_fingerprint": "device_x",
                 "decision": "blocked",
+                "verified": False,
             },
         ])
         assert is_unrecognized_device("0xABC", "device_x", col) is True
@@ -144,6 +177,7 @@ class TestIsUnrecognizedRegion:
                 "wallet_address": "0xABC",
                 "ip_address": "192.168.1.1",
                 "decision": "allow",
+                "verified": True,
             },
         ])
         assert is_unrecognized_region("0xABC", "192.168.1.1", col) is False
@@ -155,6 +189,7 @@ class TestIsUnrecognizedRegion:
                 "wallet_address": "0xABC",
                 "ip_address": "10.0.0.1",
                 "decision": "allow",
+                "verified": True,
             },
         ])
         assert is_unrecognized_region("0xABC", "203.0.113.50", col) is True
@@ -174,11 +209,11 @@ class TestIsOffHours:
         """Login during usual hours → not off-hours."""
         now = datetime(2026, 9, 9, 10, 0, 0)  # 10 AM
         past_logins = [
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 8, 9, 0, 0)},
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 7, 11, 0, 0)},
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 6, 10, 0, 0)},
         ]
         col = MockCollection(past_logins)
@@ -188,11 +223,11 @@ class TestIsOffHours:
         """Login at 3 AM when user typically logs in 9-11 AM → off-hours."""
         now = datetime(2026, 9, 9, 3, 0, 0)  # 3 AM
         past_logins = [
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 8, 9, 0, 0)},
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 7, 10, 0, 0)},
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 6, 11, 0, 0)},
         ]
         col = MockCollection(past_logins)
@@ -202,7 +237,7 @@ class TestIsOffHours:
         """Fewer than 3 past logins → benefit of the doubt → False."""
         now = datetime(2026, 9, 9, 3, 0, 0)
         past_logins = [
-            {"wallet_address": "0xABC", "decision": "allow",
+            {"wallet_address": "0xABC", "decision": "allow", "verified": True,
              "timestamp": datetime(2026, 9, 8, 10, 0, 0)},
         ]
         col = MockCollection(past_logins)

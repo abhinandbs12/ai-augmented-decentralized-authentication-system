@@ -1,48 +1,54 @@
-# Project documentation (local only — not pushed to GitHub)
+# ---------------------------------------------------------------
+# Secrets — never commit these
+# ---------------------------------------------------------------
+# .env holds the internal API token and any Twilio credentials.
+# .env.example is the template and IS tracked, so it is excluded below.
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------
+# Planning documents kept local to the team, not published
+# ---------------------------------------------------------------
 docs/
 .planning/
 PRD.md
 TRD.md
+Phase2_Remaining_Work.md
 *_Task_Plan.md
 *_Getting_Started.md
 *_Branching_Strategy.md
-Phase2_Remaining_Work.md
+*_Agent_Guide.md
 
-# Node.js
+# ---------------------------------------------------------------
+# Dependencies (restored with npm install / pip install)
+# ---------------------------------------------------------------
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 .npm
 .yarn-integrity
+venv/
+.venv/
+env/
+*.egg-info/
+.eggs/
+*.egg
 
-# Python
+# ---------------------------------------------------------------
+# Build output and generated code
+# ---------------------------------------------------------------
+dist/
+build/
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
-venv/
-.venv/
-env/
-.env
-*.env.local
 
-# Hardhat / Solidity
+# Hardhat regenerates these from contracts/contracts on every compile.
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
 
-# React / Vite
-apps/web/dist/
-apps/web/build/
-apps/web/node_modules/
-
-# Flutter
+# Flutter (apps/mobile is a Phase 2 placeholder)
 apps/mobile/.dart_tool/
 apps/mobile/.flutter-plugins
 apps/mobile/.flutter-plugins-dependencies
@@ -51,30 +57,30 @@ apps/mobile/build/
 apps/mobile/.pub-cache/
 apps/mobile/pubspec.lock
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
-# Docker
-*.log
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Coverage
+# ---------------------------------------------------------------
+# Test and coverage output
+# ---------------------------------------------------------------
 coverage/
 htmlcov/
 .coverage
 .pytest_cache/
 
-# OS
+# ---------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------
+# Editor and operating-system files
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 ehthumbs.db

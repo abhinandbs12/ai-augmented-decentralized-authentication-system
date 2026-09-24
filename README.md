@@ -282,7 +282,7 @@ class TokenBucket {
 
 function rateLimitMiddleware(req, res, next) {
   const ip = req.ip;
-  if (!buckets.has(ip)) buckets.set(ip, new TokenBucket(5, 1));
+  if (!buckets.has(ip)) buckets.set(ip, new TokenBucket(10, 1 / 3));
   buckets.get(ip).tryConsume(1) ? next() : res.status(429).json({ error: 'Too many requests' });
 }
 ```
@@ -377,7 +377,7 @@ class RiskRankedAttempts:
 
 | Function | Description |
 |----------|-------------|
-| `registerUser()` | Registers the calling wallet address (once per wallet) |
+| `registerUser(address)` | Admin-only: registers a customer's wallet, once per wallet. The backend sends the transaction, so the wallet is a parameter rather than `msg.sender` |
 | `verifySignature(address, nonce, signature)` | Recovers the signer and validates against registration; rejects reused nonces |
 | `submitMerkleRoot(bytes32 root)` | Admin-only — anchors a batched Merkle root on-chain |
 | `pauseAuth()` / `resumeAuth()` | Admin-only — global circuit breaker |
@@ -386,7 +386,7 @@ class RiskRankedAttempts:
 
 **Events:** `UserRegistered`, `LoginVerified`, `MerkleRootSubmitted`, `AuthPaused`, `AuthResumed`
 
-**Access control:** `registerUser()` is open (once per wallet); `submitMerkleRoot`, `pauseAuth`, `resumeAuth`, and `transferAdmin` are restricted via an `onlyAdmin` modifier.
+**Access control:** `registerUser`, `submitMerkleRoot`, `pauseAuth`, `resumeAuth` and `transferAdmin` are restricted via an `onlyAdmin` modifier. Registering a wallet grants nothing on its own: logging in still requires a signature from that wallet's private key.
 
 **Deployment target:** local Hardhat network for development/demo, with an optional secondary deployment to a public testnet (e.g., Polygon testnet) to demonstrate real network/gas behavior.
 
@@ -406,7 +406,8 @@ contract AuthRegistry {
     address public admin;
     bool public paused;
     mapping(address => bool) public isRegistered;
-    mapping(address => bytes32) public usedNonces;
+    // Every nonce a wallet has consumed, not only the most recent one.
+    mapping(address => mapping(bytes32 => bool)) public usedNonces;
     bytes32[] public merkleRoots;
 
     event UserRegistered(address indexed wallet);
@@ -429,10 +430,11 @@ contract AuthRegistry {
         admin = msg.sender;
     }
 
-    function registerUser() external notPaused {
-        require(!isRegistered[msg.sender], "AuthRegistry: already registered");
-        isRegistered[msg.sender] = true;
-        emit UserRegistered(msg.sender);
+    function registerUser(address wallet) external onlyAdmin notPaused {
+        require(wallet != address(0), "AuthRegistry: zero address");
+        require(!isRegistered[wallet], "AuthRegistry: already registered");
+        isRegistered[wallet] = true;
+        emit UserRegistered(wallet);
     }
 
     function verifySignature(
@@ -441,13 +443,13 @@ contract AuthRegistry {
         bytes calldata signature
     ) external notPaused returns (bool) {
         require(isRegistered[wallet], "AuthRegistry: wallet not registered");
-        require(usedNonces[wallet] != nonce, "AuthRegistry: nonce already used");
+        require(!usedNonces[wallet][nonce], "AuthRegistry: nonce already used");
 
         bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(nonce);
         address recovered = ethSignedHash.recover(signature);
         require(recovered == wallet, "AuthRegistry: invalid signature");
 
-        usedNonces[wallet] = nonce;
+        usedNonces[wallet][nonce] = true;
         emit LoginVerified(wallet, block.timestamp);
         return true;
     }
@@ -479,7 +481,7 @@ contract AuthRegistry {
 }
 ```
 
-**Design notes:** signature recovery uses OpenZeppelin's audited ECDSA library (not a custom implementation); nonce reuse is prevented per-wallet, directly enforcing replay rejection at the contract level; all state-changing admin functions are gated by `onlyAdmin`; no personally identifiable information is stored on-chain — only registration status, consumed nonces, and Merkle roots.
+**Design notes:** signature recovery uses OpenZeppelin's audited ECDSA library (not a custom implementation); every consumed nonce is remembered per wallet, so an old signature cannot become valid again after a newer login; nonce reuse is prevented per-wallet, directly enforcing replay rejection at the contract level; all state-changing admin functions are gated by `onlyAdmin`; no personally identifiable information is stored on-chain — only registration status, consumed nonces, and Merkle roots.
 
 </details>
 
@@ -493,11 +495,15 @@ All endpoints are exposed by the Node.js Backend Orchestrator. Requests/response
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/register` | Registers a new wallet address and creates an off-chain profile |
-| `POST` | `/api/auth/nonce` | Issues a fresh single-use nonce for a given wallet address |
-| `POST` | `/api/auth/login` | Submits a signed nonce; triggers risk scoring and routing |
-| `POST` | `/api/auth/otp/verify` | Verifies a submitted OTP code for the medium-risk path |
+| `POST` | `/api/auth/register` | Registers a wallet on-chain and creates its off-chain profile |
+| `POST` | `/api/auth/login` | Starts a login: scores the attempt and returns `allow`, `otp_required` or `blocked`. The single-use nonce is returned with an `allow` |
+| `POST` | `/api/auth/otp/verify` | Verifies the OTP code for the medium-risk path and returns the nonce |
+| `POST` | `/api/auth/verify` | Submits the signed nonce, verifies it on-chain and creates the session |
 | `POST` | `/api/auth/logout` | Invalidates the current session |
+
+Login is **two calls**, not one: the Trust Score is computed and the routing
+decision made before any signature challenge exists. There is deliberately no
+endpoint that issues a nonce without scoring the attempt first.
 
 **`POST /api/auth/login`**
 
@@ -505,7 +511,6 @@ Request:
 ```json
 {
   "wallet_address": "0x9F3a...c21B",
-  "signed_nonce": "0x...",
   "device_fingerprint": "a1b2c3..."
 }
 ```
@@ -516,8 +521,29 @@ Response:
   "decision": "otp_required",
   "trust_score": 67,
   "otp_challenge_id": "a1e2d3c4-otp-4455-b667-889900aabbcc",
-  "reason_hint": "new_device_detected"
+  "factors": ["unrecognized_device"]
 }
+```
+
+**`POST /api/auth/verify`**
+
+```json
+{
+  "wallet_address": "0x9F3a...c21B",
+  "nonce": "8f2c...",
+  "signature": "0x..."
+}
+```
+
+```json
+{ "decision": "allow", "trust_score": 96, "session_token": "...", "expires_at": "..." }
+```
+
+**Errors** carry one shape, with a request id that also appears in the
+`X-Request-Id` response header:
+
+```json
+{ "error": { "code": "RATE_LIMITED", "message": "Too many attempts. Please wait a moment.", "request_id": "7f3a..." } }
 ```
 
 ### Risk and Graph
@@ -541,7 +567,11 @@ Response:
 |--------|----------|-------------|
 | `POST` | `/api/admin/pause` | Calls the smart contract's `pauseAuth()` |
 | `POST` | `/api/admin/resume` | Resumes authentication after a pause |
-| `GET` | `/api/admin/attempts/top` | Top-N riskiest recent attempts (min-heap) |
+| `GET` | `/api/admin/attempts/top` | Top-N riskiest recent attempts (sorted query in Phase 1; the min-heap is Phase 2) |
+| `GET` | `/api/admin/status` | Whether authentication is currently paused |
+
+Admin and audit endpoints require a session whose wallet is listed in
+`ADMIN_WALLETS`; there is no separate admin login.
 
 <details>
 <summary><strong>More sample payloads</strong></summary>
@@ -574,19 +604,35 @@ Response:
 
 ## Data Model
 
-### Supabase (PostgreSQL)
+### PostgreSQL
 
-**`users`** — `id (uuid, PK)`, `wallet_address (unique)`, `display_name`, `created_at`, `last_login_at`
+Created by the numbered SQL files in `services/orchestrator/migrations/`, applied
+at startup. The schema is plain SQL, so the same files would run unchanged on
+Supabase's hosted PostgreSQL.
 
-**`sessions`** — `id (uuid, PK)`, `user_id (FK)`, `trust_score`, `issued_at`, `expires_at`
+**`users`** — `id (uuid, PK)`, `wallet_address (unique)`, `display_name`, `phone_number`, `created_at`, `last_login_at`
 
-**`nonces`** — `id (uuid, PK)`, `wallet_address`, `nonce_value`, `used`, `expires_at`
+**`sessions`** — `id (uuid, PK)`, `user_id (FK)`, `token_hash (unique)`, `trust_score`, `issued_at`, `expires_at`, `revoked_at`
+
+**`nonces`** — `id (uuid, PK)`, `wallet_address`, `nonce_value`, `trust_score`, `device_fingerprint`, `used`, `expires_at`
+
+**`otp_challenges`** — `id (uuid, PK)`, `wallet_address`, `code_hash`, `trust_score`, `device_fingerprint`, `attempts`, `verified`, `expires_at`
+
+**`audit_batches`** / **`audit_leaves`** — one row per anchored Merkle batch and one per leaf, so a proof can be rebuilt for any past event
+
+No password, code or token is stored in plain text: `sessions` holds a SHA-256
+hash of the session token and `otp_challenges` a SHA-256 hash of the six-digit
+code.
 
 ### MongoDB
 
-**`login_events`** — `wallet_address`, `ip_address`, `device_fingerprint`, `trust_score`, `decision`, `timestamp`
+**`login_events`** — `event_id`, `wallet_address`, `ip_address`, `device_fingerprint`, `trust_score`, `decision`, `verified`, `region`, `timestamp`
 
 **`fraud_flags`** — `cluster_id`, `node_ids[]`, `reason`, `detected_at`
+
+`verified` is true only once the signature has been checked on-chain. Feature
+extraction counts only verified logins as history, so a failed attempt cannot
+make an unfamiliar device look familiar.
 
 ### On-Chain
 
@@ -611,11 +657,17 @@ Response:
 │   └── package.json
 ├── services/
 │   ├── gateway/                     # Express.js API gateway (rate limiter, request validation)
-│   │   ├── src/index.ts
+│   │   ├── src/middleware/           # tokenBucket.ts, validate.ts, requestId.ts
 │   │   ├── Dockerfile
 │   │   └── package.json
-│   ├── orchestrator/                # Node.js backend (LRU cache, session mgmt, event queue)
-│   │   ├── src/index.ts
+│   ├── orchestrator/                # Node.js backend (login flow, sessions, OTP, audit)
+│   │   ├── migrations/               # 001_users.sql … 005_audit_batches.sql
+│   │   ├── src/routes/               # auth.ts, admin.ts, audit.ts
+│   │   ├── src/core/                 # loginStateMachine.ts, sessions.ts, nonces.ts
+│   │   ├── src/ds/lruCache.ts        # hand-written LRU cache
+│   │   ├── src/otp/                  # code generation, verification, Twilio delivery
+│   │   ├── src/chain/                # ethers client for AuthRegistry
+│   │   ├── src/audit/                # merkleTree.ts, batcher.ts
 │   │   ├── Dockerfile
 │   │   └── package.json
 │   └── risk-engine/                 # Python / FastAPI risk scoring + threat graph (BFS)
@@ -644,6 +696,7 @@ Response:
 │   └── scenarios/s1.ts - s6.ts      # Scripted demo scenarios (PRD S1-S6)
 ├── automation/n8n/workflows/        # n8n workflows (OTP step-up, admin alerts)
 ├── docker-compose.yml               # Single-command full-stack orchestration
+├── docker-compose.dev.yml           # Development overlay: publishes 3001 and 8001 locally
 ├── .env.example                     # Environment variable template
 ├── .gitignore
 └── README.md
@@ -669,34 +722,50 @@ cd ai-augmented-decentralized-authentication-system
 
 # 2. Configure environment variables
 cp .env.example .env
-# Fill in: contract address, Supabase keys, MongoDB URI, Twilio credentials
+# Set ADMIN_WALLETS and INTERNAL_API_TOKEN. Twilio values are only needed to
+# deliver the SMS code; everything else has a working default.
+#
+# Without Twilio the step-up code reaches nobody, so plain `docker compose up`
+# cannot finish that route by hand. The development overlay below sets
+# OTP_DEMO_DELIVERY=true, which writes the code to the orchestrator's log for a
+# demonstration. It is off by default and should stay off anywhere else.
 
-# 3. Build and start all services
+# 3. Build and start the whole stack
 docker compose build
 docker compose up
 
-# 4. In a separate terminal, start the local Hardhat chain and deploy
-cd contracts
-npx hardhat node
-npx hardhat run scripts/deploy.ts --network localhost
+# The chain, the contract deployment, both databases, the risk engine, the
+# orchestrator and the gateway all start in order. Only the gateway (3000) and
+# the Hardhat RPC port (8545) are published to the host.
 
-# 5. Seed demo data
-npx ts-node scripts/seed.ts
-
-# 6. Run the risk engine test suite
-cd services/risk-engine
-python -m pytest tests/ -v
-
-# 7. Open the dashboard
-# http://localhost:3000
+# 4. Start the web app (it runs outside the containers)
+cd apps/web && npm install && npm run dev
+# http://localhost:5173
 ```
+
+### Seeding and the demo scenarios
+
+The seed and scenario scripts talk to the orchestrator and the risk engine
+directly, so they need the development overlay that publishes those two ports
+on the loopback address:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+npm install
+npm run seed
+npm run s1        # s1 to s6; s5 trips the circuit breaker
+```
+
+For a live demonstration, follow [`REVIEWER_DEMO_GUIDE.md`](REVIEWER_DEMO_GUIDE.md).
+What Phase 1 delivers, and what it does not, is in
+[`PHASE1_COMPLETION_REPORT.md`](PHASE1_COMPLETION_REPORT.md).
 
 ### Running the Risk Engine Independently
 
 ```bash
 cd services/risk-engine
 pip install -r requirements.txt
-python -m pytest tests/ -v          # 50 tests, all passing
+python -m pytest tests/ -v          # 63 tests
 uvicorn app.main:app --port 8001    # Requires MongoDB running
 ```
 
@@ -723,13 +792,21 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 | TC-06 | Request a Merkle proof for a known past event | Proof returned and verifies against the on-chain root |
 | TC-07 | Tamper with a stored event, then re-verify its proof | Verification fails, proving tamper detection works |
 
-### Risk Engine Test Suite (50 Tests)
+### Automated tests
 
-| Test File | Count | Coverage |
+| Suite | Count | Command | Coverage |
+|-------|-------|---------|----------|
+| Gateway | 60 | `cd services/gateway && npm test` | Token bucket refill and capacity, request validation, proxy behaviour, error envelope |
+| Orchestrator | 165 | `cd services/orchestrator && npm test` | Login routes end to end, LRU cache, sessions, OTP lifecycle, Merkle tree and proofs, circuit breaker, OTP delivery, configuration |
+| Risk engine | 63 | `cd services/risk-engine && python -m pytest tests/` | Scoring rules, bounded BFS, feature extraction, the `/score` and `/event` endpoints |
+| Contracts | 21 | `cd contracts && npx hardhat test` | Registration, signature verification, replay rejection, pause and resume, Merkle anchoring |
+
+| Risk engine file | Count | Coverage |
 |-----------|-------|----------|
-| `test_rules.py` | 19 | All penalty combinations, clamping at 0/100, score bands, result types |
-| `test_graph.py` | 16 | BFS at distances 1-4, graph operations, fraud ring patterns |
-| `test_features.py` | 15 | Device recognition, region matching, off-hours detection, login velocity |
+| `test_rules.py` | 20 | All penalty combinations, clamping at 0/100, score bands, result types |
+| `test_features.py` | 17 | Device recognition, region matching, off-hours detection, login velocity |
+| `test_graph.py` | 15 | BFS at distances 1-4, graph operations, fraud ring patterns |
+| `test_main.py` | 11 | The internal-token guard on `/event`, event upserts, scoring responses |
 
 ---
 
@@ -812,7 +889,7 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 
 ## License
 
-This project is an academic submission for the Final Year Project, Department of Computer Science and Engineering. See [`LICENSE`](LICENSE) for reuse terms (MIT recommended for code components).
+This project is an academic submission for the Final Year Project, Department of Computer Science and Engineering. No licence file has been added yet; MIT is the intended licence for the code components.
 
 ---
 

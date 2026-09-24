@@ -1,232 +1,120 @@
 /**
- * Attempts.tsx — Admin Risk Table
- * ================================
- * Fetches recent login attempts from the orchestrator and shows them
- * in a plain table, sorted by risk (highest first), with flagged-cluster
- * rows highlighted.
+ * Attempts.tsx — riskiest attempts first
+ *
+ * The top-N riskiest recent attempts (FR-24), ranked by trust score, lowest
+ * first, with members of a flagged fraud cluster marked. Phase 1 serves this
+ * from a sorted database query; the live min-heap is Phase 2.
  *
  * Owner: Abhinand Baiju Smitha
- * Ref: docs/Abhinand_Task_Plan.md — Attempts.tsx section
- * Ref: PRD FR-24 (top-N riskiest attempts, rank ordered)
- *
- * NOTE: For Phase 1, this is a plain table — no charting library,
- * no 3D visualization. The full threat graph visualization is Phase 2.
  */
 
-import React, { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from 'react';
+import { RefreshIcon } from '../../components/icons';
+import { Badge, Button, DecisionBadge, Notice, ScoreBadge, SkeletonRows, formatTime, shortWallet } from '../../components/ui';
+import { getJson } from '../../lib/api';
+import type { LoginAttempt } from '../../lib/types';
 
-// Types matching the API response from GET /api/admin/attempts/top
-interface LoginAttempt {
-  event_id: string;
-  wallet_address: string;
-  trust_score: number;
-  decision: "allow" | "otp_required" | "blocked";
-  cluster_id?: string;
-  timestamp: string;
-  ip_address?: string;
-  device_fingerprint?: string;
-}
+const SIZES = [10, 20, 50];
 
-// Colour mapping for risk bands (PRD §3.2, TRD §4.5)
-const DECISION_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  allow: { bg: "bg-green-100", text: "text-green-800", label: "Allow" },
-  otp_required: { bg: "bg-amber-100", text: "text-amber-800", label: "OTP" },
-  blocked: { bg: "bg-red-100", text: "text-red-800", label: "Blocked" },
-};
-
-// Truncate a wallet address for display (NFR-07: no technical jargon)
-function truncateWallet(address: string): string {
-  if (address.length <= 12) return address;
-  return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-export default function Attempts() {
-  const [attempts, setAttempts] = useState<LoginAttempt[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function Attempts({ sessionToken }: { sessionToken: string }) {
+  const [attempts, setAttempts] = useState<LoginAttempt[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [topN, setTopN] = useState(20);
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    fetchAttempts();
-  }, [topN]);
-
-  async function fetchAttempts() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/attempts/top?n=${topN}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setAttempts(data.attempts || []);
-    } catch (err: any) {
-      setError(err.message || "Failed to load attempts");
+      const data = await getJson<{ attempts: LoginAttempt[] }>(`/api/admin/attempts/top?n=${topN}`, sessionToken);
+      setAttempts(data.attempts);
+    } catch (loadError) {
+      setError((loadError as Error).message);
     } finally {
       setLoading(false);
     }
-  }
+  }, [topN, sessionToken]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Login Attempts — Risk Overview
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Top {topN} riskiest recent login attempts, sorted by trust score
-            (lowest first).
-          </p>
-        </div>
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-ink-2">
+          The {topN} lowest-scoring recent attempts. A cluster tag means the wallet belongs to a ring the fraud graph flagged.
+        </p>
         <div className="flex items-center gap-2">
-          <label htmlFor="topn-select" className="text-sm text-gray-600">
-            Show:
+          <label htmlFor="top-n" className="text-sm text-ink-3">
+            Show
           </label>
           <select
-            id="topn-select"
+            id="top-n"
             value={topN}
-            onChange={(e) => setTopN(Number(e.target.value))}
-            className="border rounded px-2 py-1 text-sm"
+            onChange={(event) => setTopN(Number(event.target.value))}
+            className="h-9 rounded-lg border border-line-strong bg-surface px-2 text-sm"
           >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
+            {SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
           </select>
-          <button
-            onClick={fetchAttempts}
-            className="ml-2 px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            Refresh
-          </button>
+          <Button onClick={load} busy={loading} aria-label="Refresh">
+            <RefreshIcon />
+          </Button>
         </div>
       </div>
 
-      {/* Error state */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-          Error: {error}
-        </div>
+        <Notice tone="danger" title="Could not load the riskiest attempts">
+          {error}
+        </Notice>
       )}
 
-      {/* Loading state */}
-      {loading && (
-        <div className="text-center py-12 text-gray-500">
-          Loading attempts…
-        </div>
-      )}
-
-      {/* Table */}
-      {!loading && !error && (
-        <div className="overflow-x-auto border rounded-lg">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b">
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  #
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  Wallet
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  Trust Score
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  Decision
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  Cluster
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-gray-600">
-                  Time
-                </th>
+      <div className="relative overflow-x-auto rounded-xl border border-line bg-surface">
+        <table className="w-full min-w-[40rem] text-sm">
+          <thead className="border-b border-line bg-sunken text-left text-xs text-ink-3">
+            <tr>
+              <th scope="col" className="px-4 py-2.5 font-medium">Rank</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Wallet</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Score</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Route</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Fraud cluster</th>
+              <th scope="col" className="px-4 py-2.5 font-medium">Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {attempts === null ? (
+              <SkeletonRows cols={6} />
+            ) : attempts.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-12 text-center text-ink-3">
+                  No attempts recorded yet.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {attempts.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-4 py-8 text-center text-gray-400"
-                  >
-                    No login attempts found.
+            ) : (
+              attempts.map((attempt, index) => (
+                <tr key={attempt.event_id} className="border-b border-line last:border-b-0">
+                  <td className="tabular px-4 py-2.5 text-ink-3">{index + 1}</td>
+                  <td className="tabular px-4 py-2.5 font-medium">{shortWallet(attempt.wallet_address)}</td>
+                  <td className="px-4 py-2.5">
+                    <ScoreBadge score={attempt.trust_score} />
                   </td>
+                  <td className="px-4 py-2.5">
+                    <DecisionBadge decision={attempt.decision} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {attempt.cluster_id ? <Badge tone="danger">{attempt.cluster_id}</Badge> : <span className="text-ink-3">None</span>}
+                  </td>
+                  <td className="tabular whitespace-nowrap px-4 py-2.5 text-ink-2">{formatTime(attempt.timestamp)}</td>
                 </tr>
-              ) : (
-                attempts.map((attempt, idx) => {
-                  const style = DECISION_STYLES[attempt.decision] || DECISION_STYLES.blocked;
-                  const isFlagged = !!attempt.cluster_id;
-
-                  return (
-                    <tr
-                      key={attempt.event_id}
-                      className={`border-b hover:bg-gray-50 ${
-                        isFlagged ? "border-l-4 border-l-purple-500" : ""
-                      }`}
-                    >
-                      <td className="px-4 py-3 text-gray-400">{idx + 1}</td>
-                      <td className="px-4 py-3 font-mono text-gray-900">
-                        {truncateWallet(attempt.wallet_address)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-block w-12 text-center font-bold rounded px-2 py-0.5 ${
-                            attempt.trust_score >= 90
-                              ? "bg-green-100 text-green-800"
-                              : attempt.trust_score >= 50
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-red-100 text-red-800"
-                          }`}
-                        >
-                          {attempt.trust_score}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-medium ${style.bg} ${style.text}`}
-                        >
-                          {style.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {isFlagged ? (
-                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 border border-purple-300">
-                            🚩 {attempt.cluster_id}
-                          </span>
-                        ) : (
-                          <span className="text-gray-300">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">
-                        {new Date(attempt.timestamp).toLocaleString()}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Legend */}
-      <div className="mt-4 flex gap-4 text-xs text-gray-500">
-        <span>
-          <span className="inline-block w-3 h-3 bg-green-200 rounded mr-1"></span>
-          Allow (90–100)
-        </span>
-        <span>
-          <span className="inline-block w-3 h-3 bg-amber-200 rounded mr-1"></span>
-          OTP (50–89)
-        </span>
-        <span>
-          <span className="inline-block w-3 h-3 bg-red-200 rounded mr-1"></span>
-          Blocked (0–49)
-        </span>
-        <span>
-          <span className="inline-block w-3 h-3 bg-purple-200 rounded mr-1 border border-purple-400"></span>
-          Flagged Cluster
-        </span>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
-    </div>
+    </section>
   );
 }
