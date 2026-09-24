@@ -1,0 +1,22 @@
+{
+  "name": "banking-auth-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demo tooling for the AI-Augmented Decentralized Authentication System. Each service has its own package.json.",
+  "scripts": {
+    "seed": "ts-node scripts/seed.ts",
+    "s1": "ts-node scripts/scenarios/s1.ts",
+    "s2": "ts-node scripts/scenarios/s2.ts",
+    "s3": "ts-node scripts/scenarios/s3.ts",
+    "s4": "ts-node scripts/scenarios/s4.ts",
+    "s5": "ts-node scripts/scenarios/s5.ts",
+    "s6": "ts-node scripts/scenarios/s6.ts",
+    "typecheck": "tsc --noEmit",
+    "trust-device": "ts-node scripts/trustDevice.ts"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "ts-node": "10.9.2",
+    "typescript": "5.9.3"
+  }
+}

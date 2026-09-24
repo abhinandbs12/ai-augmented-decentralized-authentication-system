@@ -1,0 +1,28 @@
+# Development-only overlay: publishes the internal services on the loopback address
+# so the seed and scenario scripts can reach them from the host.
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# The demo and the Phase 1 review run on docker-compose.yml alone.
+
+services:
+  orchestrator:
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      # No SMS provider runs in the lab, so the step-up code would reach nobody
+      # and the route could not be finished by hand. Here the code is written to
+      # `docker compose logs orchestrator` instead. Only this overlay sets it:
+      # docker-compose.yml on its own never writes a code anywhere.
+      OTP_DEMO_DELIVERY: "true"
+
+  risk-engine:
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      # The velocity rule counts attempts per source address. In the lab the
+      # browser, the demo scripts and the seeder all reach the gateway from the
+      # one Docker address, so the TRD default of 5 fires on ordinary
+      # demonstration clicking and blocks sign-ins that should have been routed
+      # to the code step. 10 leaves room for a demonstration while still
+      # catching S5, which sends far more than that from its own address.
+      # docker-compose.yml keeps the documented default of 5.
+      VELOCITY_THRESHOLD: "10"

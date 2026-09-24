@@ -127,7 +127,8 @@ class ThreatGraph:
 
         event_count = 0
         for event in events:
-            wallet = event.get("wallet_address", "")
+            # Records written before addresses were normalised may be checksummed.
+            wallet = event.get("wallet_address", "").lower()
             ip = event.get("ip_address", "")
             device = event.get("device_fingerprint", "")
             if wallet and ip and device:
@@ -139,7 +140,7 @@ class ThreatGraph:
         flag_count = 0
         for flag in flags:
             for node_id in flag.get("node_ids", []):
-                self.bad_actors.add(node_id)
+                self.bad_actors.add(node_id.lower() if node_id.startswith("0x") else node_id)
                 flag_count += 1
 
         logger.info(

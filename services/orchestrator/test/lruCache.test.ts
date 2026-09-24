@@ -103,3 +103,41 @@ describe('LRUCache', () => {
     }
   });
 });
+
+describe('LRUCache.delete', () => {
+  it('removes an entry and reports whether it was there', () => {
+    const cache = new LRUCache<string, number>(3);
+    cache.put('a', 1);
+    cache.put('b', 2);
+
+    expect(cache.delete('a')).toBe(true);
+    expect(cache.get('a')).toBeUndefined();
+    expect(cache.get('b')).toBe(2);
+    expect(cache.delete('a')).toBe(false);
+  });
+
+  it('keeps the eviction order intact after a deletion', () => {
+    const cache = new LRUCache<string, number>(2);
+    cache.put('a', 1);
+    cache.put('b', 2);
+
+    cache.delete('b');
+    cache.put('c', 3);
+    cache.put('d', 4);
+
+    // 'a' was the only remaining entry, so it is the one evicted by 'd'.
+    expect(cache.get('a')).toBeUndefined();
+    expect(cache.get('c')).toBe(3);
+    expect(cache.get('d')).toBe(4);
+  });
+
+  it('can delete the only entry and still accept new ones', () => {
+    const cache = new LRUCache<string, number>(2);
+    cache.put('only', 1);
+
+    expect(cache.delete('only')).toBe(true);
+
+    cache.put('next', 2);
+    expect(cache.get('next')).toBe(2);
+  });
+});

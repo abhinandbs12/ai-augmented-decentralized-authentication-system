@@ -1,87 +1,74 @@
 /**
- * Scenario S5 — Circuit breaker: 50+ rapid login attempts
- * Expected: Triggers the circuit breaker within 10 seconds (TC-05)
+ * Scenario S5 — Credential stuffing trips the circuit breaker (TC-05)
+ * Expected: more than 50 blocked attempts inside 10 seconds pause
+ * authentication on the contract, so every later login is refused.
  *
- * NOTE: The actual circuit breaker is in the smart contract (Karthik's module)
- * and the orchestrator (Sunny's module). This script fires the traffic
- * and verifies that the risk engine correctly scores them as blocked.
+ * The attempts go straight to the orchestrator (development overlay, port
+ * 3001) and name one attacking address in X-Forwarded-For. Through the gateway
+ * the token bucket would stop them after ten, which is the point of the
+ * gateway, but not what this scenario is measuring.
  *
- * Ref: PRD §3.3, scenario S5
+ * Resume afterwards from the operations console, or with the command printed
+ * at the end.
+ *
+ * Ref: PRD §3.3, scenario S5; TRD §12.3
  */
 
-const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
+import { deviceFingerprint } from "../demoData";
+import { internalHeaders } from "../internalToken";
+
+const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
+const ATTACKER_IP = "203.0.113.50";
+const ATTACKER_DEVICE = deviceFingerprint("credential_stuffing_rig");
+// The first few attempts from the attacking address score 50 (new device, new
+// region) and are only routed to the code step; the velocity penalty applies
+// once that address passes VELOCITY_THRESHOLD, and those attempts score 25 and
+// are blocked. More than 50 blocked attempts inside the window trip the
+// breaker, so the total is kept well clear of that boundary.
+const TOTAL_ATTEMPTS = 80;
 
 async function main() {
-  console.log("━━━ S5: Credential-stuffing simulation (50+ rapid attempts) ━━━\n");
+  console.log("━━━ S5: Credential-stuffing attack trips the circuit breaker ━━━\n");
 
-  const TOTAL_ATTEMPTS = 55;
-  let blockedCount = 0;
-  let totalTime = 0;
-
+  let blocked = 0;
   const startTime = Date.now();
 
-  console.log(`  Firing ${TOTAL_ATTEMPTS} rapid login attempts...\n`);
-
   for (let i = 0; i < TOTAL_ATTEMPTS; i++) {
-    const wallet = `0xAttacker${String(i).padStart(4, "0")}aabb00112233445566`;
-    try {
-      const payload = {
-        wallet,
-        ip_address: "203.0.113.50",
-        device_fingerprint: "ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11ee11",
-        timestamp: new Date().toISOString(),
-      };
-      
-      const res = await fetch(`${RISK_ENGINE_URL}/score`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      
-      await fetch(`${RISK_ENGINE_URL}/event`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: payload.wallet,
-          ip_address: payload.ip_address,
-          device_fingerprint: payload.device_fingerprint,
-          trust_score: data.trust_score,
-          decision: "blocked", // Simulate attacker failing the challenge or being blocked
-          timestamp: payload.timestamp,
-        }),
-      });
-
-      if (data.trust_score < 50) blockedCount++;
-
-      if ((i + 1) % 10 === 0) {
-        console.log(`    ${i + 1}/${TOTAL_ATTEMPTS} — last score: ${data.trust_score}`);
-      }
-    } catch (e: any) {
-      // Engine may be overwhelmed — that's part of the test
-      console.log(`    Request ${i + 1} failed: ${e.message}`);
+    const res = await fetch(`${ORCHESTRATOR_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Forwarded-For": ATTACKER_IP },
+      body: JSON.stringify({
+        wallet_address: `0x${String(i + 1).padStart(40, "0")}`,
+        device_fingerprint: ATTACKER_DEVICE,
+      }),
+    });
+    if (res.status === 403) blocked++;
+    if ((i + 1) % 10 === 0) {
+      console.log(`    ${i + 1}/${TOTAL_ATTEMPTS} attempts — ${blocked} blocked`);
     }
   }
 
-  totalTime = Date.now() - startTime;
+  const elapsed = Date.now() - startTime;
+  // The pause is a transaction; give it a moment to be mined.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
+  const status = await fetch(`${ORCHESTRATOR_URL}/api/admin/status`, { headers: internalHeaders() });
+  const { paused, breaker } = await status.json();
 
   console.log(`\n  Results:`);
-  console.log(`    Total attempts:   ${TOTAL_ATTEMPTS}`);
-  console.log(`    Blocked:          ${blockedCount}`);
-  console.log(`    Total time:       ${totalTime}ms`);
-  console.log(`    Avg time/request: ${Math.round(totalTime / TOTAL_ATTEMPTS)}ms`);
+  console.log(`    Attempts:           ${TOTAL_ATTEMPTS} in ${elapsed} ms`);
+  console.log(`    Blocked (score<50): ${blocked}`);
+  console.log(`    Breaker threshold:  more than ${breaker.threshold} in ${breaker.window_ms / 1000} s`);
+  console.log(`    Authentication:     ${paused ? "PAUSED on the contract" : "still running"}`);
 
-  if (blockedCount >= TOTAL_ATTEMPTS * 0.5) {
-    console.log("\n  ✅ PASS — Majority of rapid attempts were scored as blocked.");
-  } else {
-    console.log("\n  ❌ FAIL — Expected most attempts to be blocked.");
+  if (!paused) {
+    console.log("\n  ❌ FAIL — the circuit breaker did not trip.");
     process.exit(1);
   }
 
-  console.log(
-    "\n  NOTE: Full circuit-breaker tripping requires the orchestrator + contract."
-  );
-  console.log("        This script only tests the risk-engine scoring behaviour.");
+  console.log("\n  ✅ PASS — the breaker tripped and every login is now refused.");
+  console.log("     Resume from the operations console, or:");
+  console.log(`     curl -X POST ${ORCHESTRATOR_URL}/api/admin/resume -H "X-Internal-Token: <INTERNAL_API_TOKEN>"`);
 }
 
 main().catch((e) => {

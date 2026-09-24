@@ -17,75 +17,20 @@
  * Ref: docs/Abhinand_Task_Plan.md — scripts/seed.ts section
  */
 
+import { FRAUD_RING, NORMAL_WALLETS } from "./demoData";
+import { internalHeaders } from "./internalToken";
+
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
-// ---- Normal customers (valid Ethereum addresses: 0x + 40 hex chars) ----
-const NORMAL_WALLETS = [
-  {
-    wallet: "0xA1b2C3d4E5f6a7B8c9D0e1F2a3B4c5D6e7F8a9B0",
-    display_name: "Asha Raghavan",
-    phone: "+919876543210",
-    device: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2",
-    ip: "192.168.1.100",
-  },
-  {
-    wallet: "0xB2c3D4e5F6a7b8C9d0E1f2A3b4C5d6E7f8A9b0C1",
-    display_name: "Rahul Menon",
-    phone: "+919876543211",
-    device: "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b3",
-    ip: "192.168.1.101",
-  },
-  {
-    wallet: "0xC3d4E5f6A7b8c9D0e1F2a3B4c5D6e7F8a9B0c1D2",
-    display_name: "Priya Sharma",
-    phone: "+919876543212",
-    device: "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b4c5",
-    ip: "10.0.0.10",
-  },
-  {
-    wallet: "0xD4e5F6a7B8c9d0E1f2A3b4C5d6E7f8A9b0C1d2E3",
-    display_name: "Vikram Patel",
-    phone: "+919876543213",
-    device: "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b5d6e7",
-    ip: "10.0.0.2",
-  },
-  {
-    wallet: "0xE5f6A7b8C9d0e1F2a3B4c5D6e7F8a9B0c1D2e3F4",
-    display_name: "Meera Iyer",
-    phone: "+919876543214",
-    device: "e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b6e7f8a9",
-    ip: "192.168.1.200",
-  },
-];
-
-// ---- Fraud ring: 3 wallets sharing device + IP ----
-const FRAUD_RING = {
-  shared_device: "ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00",
-  shared_ip: "203.0.113.99",
-  wallets: [
-    {
-      wallet: "0xF6a7B8c9D0e1f2A3b4C5d6E7f8A9b0C1d2E3f4A5",
-      display_name: "Mule Account A",
-      phone: "+919000000001",
-    },
-    {
-      wallet: "0xa7B8c9D0e1F2a3B4c5D6e7F8a9B0c1D2e3F4a5B6",
-      display_name: "Mule Account B",
-      phone: "+919000000002",
-    },
-    {
-      wallet: "0xB8c9D0e1f2A3b4C5d6E7f8A9b0C1d2E3f4A5b6C7",
-      display_name: "Mule Account C",
-      phone: "+919000000003",
-    },
-  ],
-};
-
-async function postJSON(url: string, body: object): Promise<any> {
+async function postJSON(
+  url: string,
+  body: object,
+  headers: Record<string, string> = { "Content-Type": "application/json" }
+): Promise<any> {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -119,7 +64,9 @@ async function seedNormalCustomers() {
           trust_score: 100,
           decision: "allow",
           timestamp: ts,
-        });
+          // A completed login: this is what makes the device and IP familiar.
+          verified: true,
+        }, internalHeaders());
       } catch (e: any) {
         // Silently continue — risk engine may not be up
       }
@@ -155,7 +102,7 @@ async function seedFraudRing() {
           trust_score: 35,
           decision: "blocked",
           timestamp: ts,
-        });
+        }, internalHeaders());
       } catch (e: any) {
         // Silently continue
       }
