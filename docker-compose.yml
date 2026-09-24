@@ -75,7 +75,6 @@ services:
     env_file: .env
     environment:
       MONGO_URL: mongodb://mongo:27017
-      SCORER: rules
       VELOCITY_THRESHOLD: "5"
       VELOCITY_WINDOW_SECONDS: "300"
     depends_on:
