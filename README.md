@@ -765,7 +765,7 @@ What Phase 1 delivers, and what it does not, is in
 ```bash
 cd services/risk-engine
 pip install -r requirements.txt
-python -m pytest tests/ -v          # 61 tests
+python -m pytest tests/ -v          # 63 tests
 uvicorn app.main:app --port 8001    # Requires MongoDB running
 ```
 
@@ -798,7 +798,7 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 |-------|-------|---------|----------|
 | Gateway | 60 | `cd services/gateway && npm test` | Token bucket refill and capacity, request validation, proxy behaviour, error envelope |
 | Orchestrator | 165 | `cd services/orchestrator && npm test` | Login routes end to end, LRU cache, sessions, OTP lifecycle, Merkle tree and proofs, circuit breaker, OTP delivery, configuration |
-| Risk engine | 61 | `cd services/risk-engine && python -m pytest tests/` | Scoring rules, bounded BFS, feature extraction, the `/score` and `/event` endpoints |
+| Risk engine | 63 | `cd services/risk-engine && python -m pytest tests/` | Scoring rules, bounded BFS, feature extraction, the `/score` and `/event` endpoints |
 | Contracts | 21 | `cd contracts && npx hardhat test` | Registration, signature verification, replay rejection, pause and resume, Merkle anchoring |
 
 | Risk engine file | Count | Coverage |
@@ -806,7 +806,7 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 | `test_rules.py` | 20 | All penalty combinations, clamping at 0/100, score bands, result types |
 | `test_features.py` | 17 | Device recognition, region matching, off-hours detection, login velocity |
 | `test_graph.py` | 15 | BFS at distances 1-4, graph operations, fraud ring patterns |
-| `test_main.py` | 9 | The internal-token guard on `/event`, event upserts, scoring responses |
+| `test_main.py` | 11 | The internal-token guard on `/event`, event upserts, scoring responses |
 
 ---
 

@@ -29,12 +29,12 @@ shown live: it needs Twilio credentials.
 | `contracts/` | `AuthRegistry.sol`, Hardhat config, deploy script | 21 Hardhat tests |
 | `services/gateway/` | Express gateway: token bucket, zod validation, request ids, proxy | 60 Vitest tests |
 | `services/orchestrator/` | Express orchestrator: login state machine, sessions, nonces, OTP, chain client, Merkle batcher, circuit breaker, Socket.IO, SQL migrations | 165 Vitest tests |
-| `services/risk-engine/` | FastAPI: rule scorer, feature extraction, threat graph and bounded BFS | 61 pytest tests |
+| `services/risk-engine/` | FastAPI: rule scorer, feature extraction, threat graph and bounded BFS | 63 pytest tests |
 | `apps/web/` | React 19 + Vite + Tailwind 4: customer screens and operations console | type-checked, built |
 | `scripts/` | Seeder, scenarios S1–S6, `trust-device` demo helper | type-checked, run live |
 | `docker-compose.yml` | Hardhat, contract deploy, Postgres, MongoDB, risk engine, orchestrator, gateway | started from clean |
 
-**307 automated tests, all passing.**
+**309 automated tests, all passing.**
 
 ## 3. Architecture
 
@@ -121,6 +121,7 @@ are local only (git-ignored) and were not changed.
 
 | Bug | Severity | Fix |
 |---|---|---|
+| One wallet spelled in two letter cases was two identities: completed sign-ins never made a device familiar, and blocked attempts could be split across spellings to dodge the auto-flag rule | HIGH | Addresses lower-cased where the risk engine receives them |
 | Step-up route impossible to finish without Twilio: the code reached nobody | HIGH | Opt-in demo delivery writes it to the service log; off by default |
 | Every `docker compose up` redeployed the contract, stranding registered users | HIGH | Deployment reuses the recorded address when it still holds code |
 | A chain restart left the orchestrator on a dead address, failing silently | MEDIUM | Start-up warning naming the address and the fix |
@@ -186,7 +187,7 @@ them.
 |---|---|
 | Gateway (Vitest) | PASS, 60 |
 | Orchestrator (Vitest) | PASS, 165 |
-| Risk engine (pytest) | PASS, 61 |
+| Risk engine (pytest) | PASS, 63 |
 | Contracts (Hardhat) | PASS, 21 |
 | Type-checks: gateway, orchestrator, web, scripts | PASS |
 | Web production build | PASS |

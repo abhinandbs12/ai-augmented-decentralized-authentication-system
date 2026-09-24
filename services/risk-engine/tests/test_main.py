@@ -218,3 +218,75 @@ class TestScore:
         window_start = login_events.last_count_query["timestamp"]["$gte"]
         elapsed = (before - window_start).total_seconds()
         assert 59 <= elapsed <= 65
+
+
+class MatchingCollection(FakeCollection):
+    """Answers find_one by exact field equality, the way MongoDB does."""
+
+    def find_one(self, query: dict):
+        for document in self.documents:
+            if all(document.get(k) == v for k, v in query.items()):
+                return document
+        return None
+
+
+class TestWalletCase:
+    """
+    One account can reach the service spelled in lower case or checksummed.
+    Both spellings must mean the same identity.
+    """
+
+    CHECKSUMMED = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+    @pytest.fixture
+    def matching_events(self, monkeypatch) -> MatchingCollection:
+        events = MatchingCollection()
+        monkeypatch.setenv("INTERNAL_API_TOKEN", TOKEN)
+        monkeypatch.setattr(
+            main, "db", FakeDatabase({"login_events": events, "fraud_flags": FakeCollection()})
+        )
+        monkeypatch.setattr(main, "threat_graph", ThreatGraph())
+        return events
+
+    def test_a_completed_sign_in_makes_the_device_familiar_in_either_spelling(
+        self, matching_events
+    ):
+        client = TestClient(main.app)
+        # The orchestrator reports the completed sign-in with the address from
+        # its user record, which is lower case...
+        client.post(
+            "/event",
+            json={**SAMPLE_EVENT, "wallet_address": self.CHECKSUMMED.lower(),
+                  "decision": "allow", "trust_score": 100, "verified": True},
+            headers={"X-Internal-Token": TOKEN},
+        )
+
+        # ...and the next attempt arrives checksummed, as a client may send it.
+        response = client.post(
+            "/score",
+            json={
+                "wallet": self.CHECKSUMMED,
+                "ip_address": SAMPLE_EVENT["ip_address"],
+                "device_fingerprint": SAMPLE_EVENT["device_fingerprint"],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        reasons = response.json()["reasons"]
+        assert "unrecognized_device" not in reasons
+        assert "unrecognized_region" not in reasons
+
+    def test_stores_and_counts_blocked_attempts_under_one_spelling(
+        self, matching_events
+    ):
+        client = TestClient(main.app)
+        client.post(
+            "/event",
+            json={**SAMPLE_EVENT, "wallet_address": self.CHECKSUMMED, "decision": "blocked"},
+            headers={"X-Internal-Token": TOKEN},
+        )
+
+        assert matching_events.documents[0]["wallet_address"] == self.CHECKSUMMED.lower()
+        # The auto-flag rule counts by the same normalised address, so varying
+        # the letter case cannot split an attacker's blocked attempts.
+        assert matching_events.last_count_query["wallet_address"] == self.CHECKSUMMED.lower()

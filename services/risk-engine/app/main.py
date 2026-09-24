@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pymongo import MongoClient
 
 from app.scorers.rules import calculate_score
@@ -39,12 +39,26 @@ logger = logging.getLogger(__name__)
 # Pydantic models — request and response
 # ---------------------------------------------------------------------------
 
+def _normalise_wallet(value: str) -> str:
+    """
+    An Ethereum address is the same account in any letter case; the mixed case
+    is only an EIP-55 checksum for display. MongoDB and the threat graph compare
+    strings exactly, so without this one account spelled two ways became two
+    identities: a completed sign-in stored in lower case never made its device
+    familiar to a later attempt sent checksummed, and an attacker could split
+    their blocked attempts across spellings to stay under the auto-flag rule.
+    """
+    return value.lower()
+
+
 class LoginContext(BaseModel):
     """Request body for POST /score."""
     wallet: str = Field(..., description="Wallet address of the login attempt")
     ip_address: str = Field(..., description="Source IP address")
     device_fingerprint: str = Field(..., description="SHA-256 device fingerprint")
     timestamp: datetime = Field(..., description="Timestamp of the login attempt")
+
+    _lowercase_wallet = field_validator("wallet")(lambda value: _normalise_wallet(value))
 
 
 class ScoreResult(BaseModel):
@@ -204,6 +218,8 @@ class LoginEvent(BaseModel):
         description="True only once the signature was verified on-chain; "
                     "only these attempts count as trusted history",
     )
+
+    _lowercase_wallet = field_validator("wallet_address")(lambda value: _normalise_wallet(value))
 
 
 def _require_internal_token(presented_token: str | None) -> None:

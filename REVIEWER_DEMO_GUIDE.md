@@ -86,16 +86,14 @@ same address, so finish this preparation five minutes early.
 
 1. In MetaMask, select **Account #0**. Choose **Open an account**, enter a name
    and a mobile number, and choose **Connect wallet and open account**.
-2. The "One more check" screen appears: the device is new. Run:
+2. The "One more check" screen appears: the device is new. Read the code:
    ```bash
-   npm run trust-device -- 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+   docker compose logs orchestrator | grep "DEMO DELIVERY" | tail -1
    ```
-   This records the browser as a device the administrator has used before. In
-   production that history comes from a completed SMS-code sign-in; the lab has
-   no SMS provider, so it is seeded instead.
-3. Reload the page, choose **Continue with wallet** and approve in MetaMask. You
-   should land on "You are signed in" with **Open operations console** below.
-4. Sign out.
+   Enter it, choose **Verify code** and approve in MetaMask. You land on
+   "You are signed in" with **Open operations console** below.
+3. Sign out. That completed sign-in is now trusted history, so the next one
+   from this browser goes straight to the signature.
 
 ## D. Step-by-step demo (about 8 minutes)
 
@@ -132,12 +130,15 @@ the demo scripts.
 
 ### Step 3: A familiar device goes straight to the signature (1 minute)
 
-1. **Run:** `npm run trust-device -- 0x70997970C51812dc3A010C7d01b50e0d17dc79C8`
-2. **Click:** reload, then **Continue with wallet**, then approve in MetaMask.
-3. **Result:** "You are signed in". Score 100 / 100, all five checks green, and
-   "The bank's security ledger confirmed your approval".
-4. **Proves:** the high-trust path, signature verification by the smart
-   contract, and a 30-minute revocable session.
+1. **Click:** **Sign out**, then **Continue with wallet** again as Asha, and
+   approve in MetaMask.
+2. **Result:** no code this time. "You are signed in", Score 100 / 100, all
+   five checks green, and "The bank's security ledger confirmed your approval".
+3. **Say:** the sign-in completed in Step 2 is now trusted history. The same
+   device and network are recognised, so the score reaches the top band.
+4. **Proves:** the high-trust path, that verified sign-ins build trust (only
+   verified ones count, so retrying cannot fake familiarity), signature
+   verification by the smart contract, and a 30-minute revocable session.
 
 ### Step 4: The operations console (2 minutes)
 
