@@ -1,10 +1,5 @@
-import Attempts from './pages/admin/Attempts';
+import Dashboard from './pages/admin/Dashboard';
 
-function App() {
-  return (
-    <div className="min-h-screen bg-gray-100">
-      <Attempts />
-    </div>
-  );
+export default function App() {
+  return <Dashboard />;
 }
-export default App;
