@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CustomerFrame } from './components/CustomerFrame';
-import { getJson, postJson } from './lib/api';
+import { getJson, postJson, setBrowserSigner, usingBrowserSigner } from './lib/api';
 import { loadSession, saveSession, type Session } from './lib/session';
 import type { OtpDelivery } from './lib/types';
 import Account from './pages/Account';
@@ -10,9 +10,16 @@ import Otp from './pages/Otp';
 import Vault from './pages/Vault';
 
 type Screen =
-  | { name: 'welcome' }
+  | { name: 'welcome'; notice?: string }
   | { name: 'signing'; wallet: string; attempt: number }
-  | { name: 'code'; wallet: string; otpChallengeId: string; factors: string[]; delivery: OtpDelivery }
+  | {
+      name: 'code';
+      wallet: string;
+      otpChallengeId: string;
+      factors: string[];
+      delivery: OtpDelivery;
+      resendInSeconds: number;
+    }
   | { name: 'account' }
   | { name: 'console' };
 
@@ -40,27 +47,64 @@ export default function App() {
     history.replaceState(null, '', screen.name === 'console' ? '#console' : location.pathname);
   }, [screen.name]);
 
-  const restart = useCallback(() => setScreen({ name: 'welcome' }), []);
+  // A key unlocked in this browser (FR-01) stays in memory for one sign-in only.
+  const restart = useCallback(() => {
+    setBrowserSigner(null);
+    setScreen({ name: 'welcome' });
+  }, []);
 
   const signedIn = useCallback((next: Session) => {
+    setBrowserSigner(null);
     saveSession(next);
     setSession(next);
     setScreen({ name: 'account' });
   }, []);
 
   const codeRequired = useCallback(
-    (wallet: string) => (challenge: { otpChallengeId: string; factors: string[]; delivery: OtpDelivery }) =>
-      setScreen({
-        name: 'code',
-        wallet,
-        otpChallengeId: challenge.otpChallengeId,
-        factors: challenge.factors,
-        delivery: challenge.delivery,
-      }),
+    (wallet: string) =>
+      (challenge: { otpChallengeId: string; factors: string[]; delivery: OtpDelivery; resendInSeconds: number }) =>
+        setScreen({
+          name: 'code',
+          wallet,
+          otpChallengeId: challenge.otpChallengeId,
+          factors: challenge.factors,
+          delivery: challenge.delivery,
+          resendInSeconds: challenge.resendInSeconds,
+        }),
     [],
   );
 
+  // Switching accounts in the wallet part-way through a sign-in would sign with
+  // the wrong account, so that sign-in stops and says why.
+  useEffect(() => {
+    const provider = (
+      window as unknown as {
+        ethereum?: {
+          on?: (event: string, listener: (accounts: string[]) => void) => void;
+          removeListener?: (event: string, listener: (accounts: string[]) => void) => void;
+        };
+      }
+    ).ethereum;
+    if (!provider?.on) return;
+
+    const onAccountsChanged = (accounts: string[]) => {
+      if (usingBrowserSigner()) return;
+      setScreen((current) =>
+        (current.name === 'signing' || current.name === 'code') &&
+        accounts[0]?.toLowerCase() !== current.wallet.toLowerCase()
+          ? {
+              name: 'welcome',
+              notice: 'Your wallet switched to another account, so this sign-in was stopped. Sign in again.',
+            }
+          : current,
+      );
+    };
+    provider.on('accountsChanged', onAccountsChanged);
+    return () => provider.removeListener?.('accountsChanged', onAccountsChanged);
+  }, []);
+
   async function signOut() {
+    setBrowserSigner(null);
     if (session) {
       await postJson('/api/auth/logout', {}, session.token).catch(() => undefined);
     }
@@ -76,7 +120,10 @@ export default function App() {
   return (
     <CustomerFrame>
       {screen.name === 'welcome' && (
-        <Vault onWallet={(wallet) => setScreen({ name: 'signing', wallet, attempt: Date.now() })} />
+        <Vault
+          notice={screen.notice}
+          onWallet={(wallet) => setScreen({ name: 'signing', wallet, attempt: Date.now() })}
+        />
       )}
       {screen.name === 'signing' && (
         <Login
@@ -93,6 +140,7 @@ export default function App() {
           otpChallengeId={screen.otpChallengeId}
           factors={screen.factors}
           delivery={screen.delivery}
+          resendInSeconds={screen.resendInSeconds}
           onSignedIn={signedIn}
           onRestart={restart}
         />

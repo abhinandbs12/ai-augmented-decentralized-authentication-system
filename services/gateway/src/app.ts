@@ -29,8 +29,10 @@ export function createApp(config: GatewayConfig): Express {
     createProxyMiddleware({
       target: config.orchestratorUrl,
       pathFilter: '/api',
+      // Only the upstream timeout: it ends in handleOrchestratorError's 503. An
+      // incoming-request timeout of the same length fired first and dropped the
+      // client's connection without any response.
       proxyTimeout: 5000,
-      timeout: 5000,
       on: {
         proxyReq: prepareOrchestratorRequest,
         error: handleOrchestratorError,

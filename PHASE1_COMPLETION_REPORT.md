@@ -8,7 +8,7 @@ Singh, Abhinand Baiju Smitha.
 
 Phase 1 now runs end to end from one `docker compose up`: a customer registers a
 wallet on chain, every sign-in is scored before any challenge exists, the score
-routes it to a wallet signature, an SMS-code step or a block, the contract
+routes it to a wallet signature, an email-code step or a block, the contract
 verifies the signature and refuses replays, completed sign-ins are sealed into
 Merkle batches anchored on chain, a fraud ring is detected through the graph, and
 a credential-stuffing burst trips an automatic circuit breaker that pauses the
@@ -19,22 +19,32 @@ Measured against the PRD's 29 functional requirements, 17 are fully implemented
 and verified, 5 partly, and 7 not (4 of those are Phase 2 work, 3 are
 "Could"-priority stretch items). That is about **67% of all functional
 requirements**, **75% of the in-scope ones**, and **86% of the Must
-requirements** (section 21). SMS delivery is the one Phase 1 item that cannot be
-shown live: it needs Twilio credentials.
+requirements** (section 21). Since 2026-09-26 the step-up code is emailed
+instead of sent by SMS: the demo delivers it to a local inbox (Mailpit), real
+inboxes need SMTP credentials, and the change of channel from the PRD's
+"SMS through Twilio" (FR-11, FR-21) still needs sign-off.
 
 ## 2. Repository overview
 
 | Path | What it is | Tests |
 |---|---|---|
 | `contracts/` | `AuthRegistry.sol`, Hardhat config, deploy script | 21 Hardhat tests |
-| `services/gateway/` | Express gateway: token bucket, zod validation, request ids, proxy | 60 Vitest tests |
-| `services/orchestrator/` | Express orchestrator: login state machine, sessions, nonces, OTP, chain client, Merkle batcher, circuit breaker, Socket.IO, SQL migrations | 165 Vitest tests |
+| `services/gateway/` | Express gateway: token bucket, zod validation, request ids, proxy | 66 Vitest tests |
+| `services/orchestrator/` | Express orchestrator: login state machine, sessions, nonces, OTP, chain client, Merkle batcher, circuit breaker, Socket.IO, SQL migrations | 201 Vitest tests |
 | `services/risk-engine/` | FastAPI: rule scorer, feature extraction, threat graph and bounded BFS | 63 pytest tests |
 | `apps/web/` | React 19 + Vite + Tailwind 4: customer screens and operations console | type-checked, built |
 | `scripts/` | Seeder, scenarios S1–S6, `trust-device` demo helper | type-checked, run live |
 | `docker-compose.yml` | Hardhat, contract deploy, Postgres, MongoDB, risk engine, orchestrator, gateway | started from clean |
 
-**309 automated tests, all passing.**
+**351 automated tests, all passing** (309 at first writing; 42 added with the
+fixes of 2026-09-25/26).
+
+Since the first writing (2026-09-25/26): the step-up code is emailed, with a new
+code available after 30 seconds; a customer without a wallet extension can
+create a key pair in the browser (FR-01); the orchestrator rebuilds the local
+chain's registrations and audit roots from PostgreSQL after a restart; expired
+code challenges and nonces are deleted automatically; and the lab overlay gives
+the gateway and the velocity rule room for a team rehearsing.
 
 ## 3. Architecture
 
@@ -45,9 +55,10 @@ Browser (React, MetaMask) ──► Gateway :3000 ──► Orchestrator (intern
                                                  └─► AuthRegistry.sol on Hardhat :8545
 ```
 
-Only the gateway (3000) and the chain RPC (8545) are published. The development
-overlay `docker-compose.dev.yml` adds 3001 and 8001 on 127.0.0.1 for the demo
-scripts. The full diagram is in `REVIEWER_DEMO_GUIDE.md`.
+Only the gateway (3000) is published to the network. The chain RPC (8545) is
+bound to 127.0.0.1, because its development accounts, the contract admin among
+them, are unlocked. The development overlay `docker-compose.dev.yml` adds 3001
+and 8001 on 127.0.0.1 for the demo scripts. The full diagram is in `REVIEWER_DEMO_GUIDE.md`.
 
 ## 4. Documentation audit
 
@@ -84,7 +95,7 @@ are local only (git-ignored) and were not changed.
 | Smart contract | `AuthRegistry.sol` | Yes | 21 Hardhat tests, live |
 | Basic dashboard table | Operations console | Yes | Browser |
 | Gateway rate limiting | `tokenBucket.ts` | Yes | Live 429 on the 11th request |
-| OTP step-up (Twilio direct) | `otpService.ts`, `twilioSender.ts`, `sender.ts` | Partly: SMS delivery needs credentials, demo delivery works | Live browser run, 9/9 API checks |
+| OTP step-up (email) | `otpService.ts`, `emailSender.ts` | Yes: emailed over SMTP, to Mailpit in the demo; real inboxes need SMTP credentials | Live browser run, 15/15 and 9/9 email checks |
 | Circuit breaker | Contract pause + `circuitBreaker.ts` | Yes | S5 live: 60 blocked in 1.5 s → paused |
 | Sessions + logout | `SessionStore` (LRU + Postgres) | Yes | E2E |
 | Socket.IO stream | `realtime/socket.ts` | Yes | Console live pill, row updates |
@@ -110,7 +121,7 @@ are local only (git-ignored) and were not changed.
   again, under the same event id, once the signature is verified. The challenge
   carries the score, device, reasons and route, so the completed record says why
   it was routed the way it was.
-- **Web:** customer registration and sign-in, SMS-code step, signed-in summary;
+- **Web:** customer registration and sign-in, email-code step, signed-in summary;
   operations console with live activity, attempt detail, riskiest-first view,
   audit verification in the browser with a tamper simulation, and controls with
   the breaker meter.
@@ -122,7 +133,7 @@ are local only (git-ignored) and were not changed.
 | Bug | Severity | Fix |
 |---|---|---|
 | One wallet spelled in two letter cases was two identities: completed sign-ins never made a device familiar, and blocked attempts could be split across spellings to dodge the auto-flag rule | HIGH | Addresses lower-cased where the risk engine receives them |
-| Step-up route impossible to finish without Twilio: the code reached nobody | HIGH | Opt-in demo delivery writes it to the service log; off by default |
+| Step-up route impossible to finish without Twilio: the code reached nobody | HIGH | Opt-in demo delivery writes it to the service log; off by default. Superseded 2026-09-26: codes are emailed, to a local inbox in the demo, and never logged |
 | Every `docker compose up` redeployed the contract, stranding registered users | HIGH | Deployment reuses the recorded address when it still holds code |
 | A chain restart left the orchestrator on a dead address, failing silently | MEDIUM | Start-up warning naming the address and the fix |
 | The code screen claimed an SMS had been sent when none had | MEDIUM | The route reports the delivery channel and the screen says which |
@@ -160,7 +171,9 @@ codes and status numbers.
 
 ## 11. Database improvements
 
-Six migrations, applied at start-up and recorded, so a restart is a no-op.
+Eight migrations, applied at start-up and recorded, so a restart is a no-op.
+Migration 007 moves the code step from a phone number to an email address and
+008 indexes challenge expiry for the cleanup job.
 Migration 006 is additive (`ADD COLUMN IF NOT EXISTS`), so it upgrades an
 existing database in place, which was verified. Tokens and codes are stored only
 as SHA-256 hashes. MongoDB indexes cover the scoring queries.
@@ -195,10 +208,11 @@ them.
 | Live login-flow script | PASS, 21 of 21 checks |
 | Live breaker, audit and degradation script | PASS, 16 of 16 checks |
 | Scenarios S1–S6 | PASS |
-| Browser: registration, SMS-code step, signature, console, audit verify and tamper | PASS (MetaMask stood in for by a script that forwards to the Hardhat node's accounts) |
+| Browser: registration, email-code step, signature, console, audit verify and tamper | PASS (MetaMask stood in for by a script that forwards to the Hardhat node's accounts) |
 | Rate limiting | PASS, 429 on the 11th request |
 | Step-up route end to end through the gateway | PASS, 9 of 9 checks |
-| SMS delivery through Twilio | BLOCKED, no credentials |
+| Email delivery to a local inbox (Mailpit) | PASS, including resend, expiry and a mail server outage |
+| Email delivery to a real inbox | MANUAL, needs SMTP credentials |
 | Real MetaMask extension | NOT RUN in this environment |
 
 Mutation checks: re-introducing the replay bug, the registration bug, a disabled
@@ -259,19 +273,22 @@ relevant tests fail.
 
 ## 19. Remaining issues
 
-- SMS delivery needs Twilio trial credentials in `.env`. Without them the demo
-  stack writes the code to the orchestrator's log (`OTP_DEMO_DELIVERY`, set only
-  by `docker-compose.dev.yml`), and the code screen says so. Nothing else about
-  the step changes: the code is random, stored only as a SHA-256 hash, expires
-  in five minutes, allows three attempts, and is never returned by the API.
+- Email to real inboxes needs SMTP credentials in `.env` (see `.env.example`).
+  Without them the demo stack sends every code to Mailpit, a local inbox at
+  http://localhost:8025. The code is random, stored only as a SHA-256 hash,
+  expires in five minutes, allows three attempts, can be replaced at most every
+  30 seconds and three times in all, and is never logged or returned by the API.
+- Emailing the code changes the channel the PRD names for FR-11 and FR-21
+  ("SMS through Twilio"). The change needs the supervisor's sign-off and an
+  update to the PRD and TRD.
 - The real MetaMask extension was not exercised here; the same message-signing
   call was, through the Hardhat node.
 - Velocity counts every attempt from one address, and in the lab the browser,
   the seeder and the scripts all arrive from the one Docker address. The demo
-  overlay raises `VELOCITY_THRESHOLD` from 5 to 10 so ordinary demonstration
-  clicking is not penalised; `docker-compose.yml` keeps the documented 5. Past
-  ten attempts in five minutes the penalty still applies, which is correct
-  behaviour but must be planned around.
+  overlay raises `VELOCITY_THRESHOLD` from 5 to 20 and the gateway bucket from
+  10 to 60 so a team rehearsing is not penalised; `docker-compose.yml` keeps the
+  documented values. Past twenty attempts in five minutes the penalty still
+  applies, which is correct behaviour but must be planned around.
 - A blocked attempt flags its wallet, and because every local client shares one
   address the fraud graph can then link the demo wallet to that flag. Running
   scenario S3 or S4 before the customer steps can therefore block a sign-in that
@@ -286,7 +303,7 @@ From `Phase2_Remaining_Work.md`, untouched by this work: Isolation Forest scorer
 score-explainability polish; 3D force-directed graph and cluster detail view;
 sliding-window rate limiter; live min-heap for top-N; polished control room and
 mass-attack alert UI; the animated Live Authentication Flow screen; audit-proof
-UI polish; n8n workflows replacing direct Twilio; the Flutter app and
+UI polish; n8n workflows for the code email and admin alerts; the Flutter app and
 `/api/mobile/*`; WebAuthn; attack simulator UI; haptics; integration and
 Playwright E2E suites; CI; final report, paper and backup video.
 
@@ -300,7 +317,7 @@ and documentation count nothing.
 |---|---|---|---|---|
 | Identity and registration | FR-01–04 | 4 | 0 | 0 |
 | Login and signatures | FR-05–08 | 3 | 0 | 1 (FR-08 WebAuthn, Could) |
-| Risk scoring | FR-09–13 | 4 | 1 (FR-11 SMS delivery) | 0 |
+| Risk scoring | FR-09–13 | 4 | 1 (FR-11 code delivery) | 0 |
 | Fraud graph | FR-14–16 | 2 | 1 (FR-16 cluster tag, no graph view) | 0 |
 | Chain and audit | FR-17–19 | 3 | 0 | 0 |
 | Automation | FR-20–22 | 0 | 2 (FR-21 delivery; FR-22 in-console alert only) | 1 (FR-20 n8n, Phase 2) |
@@ -313,6 +330,9 @@ and documentation count nothing.
 - Excluding the three Could-priority items: 19.5 / 26 = **75%**
 - Must-priority requirements: 18 of 21 = **86%** (FR-11 and FR-21 half each for
   delivery; FR-20 and FR-23 are Phase 2)
+- Update 2026-09-26: the code is now emailed and verified end to end with a
+  local mail server. FR-11 and FR-21 still count as partly done: the PRD names
+  SMS, and the change of channel is not yet signed off.
 
 The 50% bar is met by working features the demo shows live, not by counting files.
 
@@ -331,7 +351,10 @@ cd services/risk-engine && python -m pytest tests/
 cd contracts && npx hardhat test
 npm run typecheck
 docker compose ps
-npm run seed && npm run s1 && npm run s2 && npm run s3 && npm run s4 && npm run s5 && npm run s6
+npm run seed && npm run s1 && npm run s2 && npm run s3 && npm run s4 && npm run s5
+# S5 leaves authentication paused. Resume it in the console, complete one
+# sign-in, wait up to 60 s for the batch to seal, then:
+npm run s6
 ```
 
 Endpoints on the gateway: `POST /api/auth/register`, `POST /api/auth/login`,

@@ -11,20 +11,24 @@ import { join } from "node:path";
 
 const VARIABLE = "INTERNAL_API_TOKEN";
 
-function readFromEnvFile(): string {
+// A setting from the shell, or else from the repository's .env.
+export function readSetting(name: string): string {
+  if (process.env[name]) {
+    return process.env[name]!.trim();
+  }
   try {
     const contents = readFileSync(join(__dirname, "..", ".env"), "utf8");
     const line = contents
       .split(/\r?\n/)
-      .find((candidate) => candidate.startsWith(`${VARIABLE}=`));
-    return line ? line.slice(VARIABLE.length + 1).trim() : "";
+      .find((candidate) => candidate.startsWith(`${name}=`));
+    return line ? line.slice(name.length + 1).trim() : "";
   } catch {
     return "";
   }
 }
 
 export function internalHeaders(): Record<string, string> {
-  const token = process.env[VARIABLE] || readFromEnvFile();
+  const token = readSetting(VARIABLE);
   if (!token) {
     console.error(
       `${VARIABLE} is not set. Copy .env.example to .env and give it a value, ` +

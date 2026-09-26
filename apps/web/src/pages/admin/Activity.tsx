@@ -29,7 +29,7 @@ export default function Activity({ attempts, sessionToken }: ActivityProps) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="max-w-prose text-sm text-ink-2">
           Every attempt is scored before any challenge exists. The score alone picks the route: 90 and above
-          goes to the wallet signature, 50 to 89 needs an SMS code first, below 50 is blocked. Select a wallet to
+          goes to the wallet signature, 50 to 89 needs an email code first, below 50 is blocked. Select a wallet to
           see how its score was reached and how far the attempt got.
         </p>
         <div role="group" aria-label="Order" className="inline-flex rounded-lg border border-line-strong bg-surface p-0.5">
@@ -66,7 +66,7 @@ export default function Activity({ attempts, sessionToken }: ActivityProps) {
 
 const ROUTES: { decision: Decision; label: string; bar: string }[] = [
   { decision: 'allow', label: 'Straight to signature', bar: 'bg-success' },
-  { decision: 'otp_required', label: 'SMS code first', bar: 'bg-warning' },
+  { decision: 'otp_required', label: 'Email code first', bar: 'bg-warning' },
   { decision: 'blocked', label: 'Blocked', bar: 'bg-danger' },
 ];
 
@@ -246,7 +246,7 @@ function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: (
   const arithmetic = Math.max(0, 100 - penalties.reduce((sum, factor) => sum + factor.penalty, 0));
   const scoreExplained = arithmetic === attempt.trust_score;
   const challenge =
-    attempt.decision === 'blocked' ? 'None: blocked before any challenge' : attempt.decision === 'otp_required' ? 'SMS code, then wallet signature' : 'Wallet signature';
+    attempt.decision === 'blocked' ? 'None: blocked before any challenge' : attempt.decision === 'otp_required' ? 'Email code, then wallet signature' : 'Wallet signature';
 
   const stations = [
     { label: 'Scored by the risk engine', done: true, detail: `${attempt.trust_score} / 100` },
@@ -304,7 +304,7 @@ function AttemptDetail({ attempt, onClose }: { attempt: LoginAttempt; onClose: (
         !scoreExplained && (
           <p className="mt-2 text-xs text-ink-3">
             {factors.length === 0 && attempt.trust_score === 70
-              ? 'No factors: the risk engine was unreachable, so the attempt was routed to an SMS code (never allowed).'
+              ? 'No factors: the risk engine was unreachable, so the attempt was routed to an email code (never allowed).'
               : 'Score as returned by the risk engine.'}
           </p>
         )

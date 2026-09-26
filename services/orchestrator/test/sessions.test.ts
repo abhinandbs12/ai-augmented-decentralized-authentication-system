@@ -33,6 +33,13 @@ vi.mock('../src/db/sessions', () => ({
     row.revoked = true;
     return true;
   },
+  revokeSessionsExcept: async (_pool: Pool, walletAddresses: string[]) => {
+    const ending = [...rows.values()].filter((row) => !row.revoked && !walletAddresses.includes(row.walletAddress));
+    for (const row of ending) {
+      row.revoked = true;
+    }
+    return ending.length;
+  },
 }));
 
 const pool = {} as Pool;
@@ -105,5 +112,18 @@ describe('SessionStore', () => {
 
     await expect(store.find(session.token)).resolves.toBeNull();
     await expect(store.revoke(session.token)).resolves.toBe(false);
+  });
+
+  // A pause ends every session but the administrators' (TRD §11.3). The cached
+  // copy must go too, or the revoked token would keep working from memory.
+  it('revokes every session except the listed wallets, in the cache as well', async () => {
+    const { store } = createStore();
+    const customer = await store.issue(USER, 96);
+    const admin = await store.issue({ id: 'admin-1', walletAddress: '0xad00ad00ad00ad00ad00ad00ad00ad00ad00ad00' }, 96);
+
+    await expect(store.revokeAllExcept(['wallet-of-admin-1'])).resolves.toBe(1);
+
+    await expect(store.find(customer.token)).resolves.toBeNull();
+    await expect(store.find(admin.token)).resolves.toMatchObject({ walletAddress: 'wallet-of-admin-1' });
   });
 });

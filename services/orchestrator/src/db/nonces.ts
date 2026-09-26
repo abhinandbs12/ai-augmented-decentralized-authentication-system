@@ -14,15 +14,18 @@ export type NonceConsumption =
   | { status: 'used' }
   | { status: 'expired' };
 
+// `id` is given only when the nonce continues an attempt that already has an
+// id (the code challenge on the step-up route); otherwise one is generated.
 export async function insertNonce(
   pool: Pool,
-  nonce: { walletAddress: string; value: string; expiresAt: Date } & AttemptContext,
+  nonce: { id?: string; walletAddress: string; value: string; expiresAt: Date } & AttemptContext,
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO nonces (wallet_address, nonce_value, trust_score, device_fingerprint, factors, route, expires_at)
-     VALUES (lower($1), $2, $3, $4, $5, $6, $7)
+    `INSERT INTO nonces (id, wallet_address, nonce_value, trust_score, device_fingerprint, factors, route, expires_at)
+     VALUES (COALESCE($1::uuid, gen_random_uuid()), lower($2), $3, $4, $5, $6, $7, $8)
      RETURNING id`,
     [
+      nonce.id ?? null,
       nonce.walletAddress,
       nonce.value,
       nonce.trustScore,

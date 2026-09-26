@@ -18,10 +18,14 @@
  */
 
 import { FRAUD_RING, NORMAL_WALLETS } from "./demoData";
-import { internalHeaders } from "./internalToken";
+import { internalHeaders, readSetting } from "./internalToken";
 
 const ORCHESTRATOR_URL = process.env.ORCHESTRATOR_URL || "http://localhost:3001";
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
+// Asha is the customer of the live demonstration. With a real mail provider set
+// up, DEMO_CUSTOMER_EMAIL (shell or .env) sends her codes to a real inbox; the
+// example.com addresses otherwise only ever reach the lab's Mailpit inbox.
+const DEMO_CUSTOMER_EMAIL = readSetting("DEMO_CUSTOMER_EMAIL");
 
 async function postJSON(
   url: string,
@@ -46,7 +50,7 @@ async function seedNormalCustomers() {
       const reg = await postJSON(`${ORCHESTRATOR_URL}/api/auth/register`, {
         wallet_address: cust.wallet,
         display_name: cust.display_name,
-        phone_number: cust.phone,
+        email: cust === NORMAL_WALLETS[0] && DEMO_CUSTOMER_EMAIL ? DEMO_CUSTOMER_EMAIL : cust.email,
       });
       console.log(`  [OK] Registered ${cust.display_name}: ${reg.status}`);
     } catch (e: any) {
@@ -84,7 +88,7 @@ async function seedFraudRing() {
       const reg = await postJSON(`${ORCHESTRATOR_URL}/api/auth/register`, {
         wallet_address: mule.wallet,
         display_name: mule.display_name,
-        phone_number: mule.phone,
+        email: mule.email,
       });
       console.log(`  [OK] Registered ${mule.display_name}: ${reg.status}`);
     } catch (e: any) {

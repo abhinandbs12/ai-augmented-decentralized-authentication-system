@@ -2,6 +2,7 @@ import { Router, type RequestHandler } from 'express';
 import type { Db } from 'mongodb';
 import { ChainError, type AuthRegistryClient } from '../chain/authRegistryClient';
 import type { CircuitBreaker } from '../core/circuitBreaker';
+import type { SessionStore } from '../core/sessions';
 import { sendError, type ErrorCode } from '../errors';
 import type { Realtime } from '../realtime/socket';
 import { parseTopAttemptsLimit } from './topAttemptsLimit';
@@ -12,6 +13,8 @@ export interface AdminDependencies {
   chain: AuthRegistryClient;
   breaker: CircuitBreaker;
   realtime: Realtime;
+  sessions: SessionStore;
+  adminWallets: string[];
   requireAdmin: RequestHandler;
 }
 
@@ -69,11 +72,14 @@ export function createAdminRoutes(deps: AdminDependencies): Router {
   );
 
   // FR-19: the circuit breaker lives in the contract, so pausing stops every
-  // login regardless of its Trust Score.
+  // login regardless of its Trust Score. Customer sessions end with it (TRD
+  // §11.3); administrators stay signed in so that one of them can resume.
+  // pauseAuth() is idempotent, so a pause that failed here can simply be retried.
   router.post(
     '/pause',
     asyncRoute(async (_req, res) => {
-      await callChain(res, () => deps.chain.pauseAuth(), (txHash) => {
+      await callChain(res, () => deps.chain.pauseAuth(), async (txHash) => {
+        await deps.sessions.revokeAllExcept(deps.adminWallets);
         deps.realtime.emitSystem('paused', 'administrator');
         return { paused: true, tx_hash: txHash };
       });
@@ -131,15 +137,19 @@ export function createAdminRoutes(deps: AdminDependencies): Router {
   return router;
 }
 
+// Only the chain call maps to a chain error. Anything `body` throws, such as a
+// database failure, reaches the error handler as the 500 it is.
 async function callChain(
   res: Parameters<typeof sendError>[0],
   call: () => Promise<{ txHash: string }>,
-  body: (txHash: string) => Record<string, unknown>,
+  body: (txHash: string) => Record<string, unknown> | Promise<Record<string, unknown>>,
 ): Promise<void> {
+  let txHash: string;
   try {
-    const { txHash } = await call();
-    res.json(body(txHash));
+    ({ txHash } = await call());
   } catch (error) {
     sendError(res, CHAIN_ERROR_RESPONSES[(error as ChainError).code] ?? 'CHAIN_UNAVAILABLE');
+    return;
   }
+  res.json(await body(txHash));
 }

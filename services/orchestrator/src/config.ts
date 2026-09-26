@@ -11,29 +11,33 @@ export interface OrchestratorConfig {
   nonceTtlMs: number;
   otpTtlMs: number;
   otpMaxAttempts: number;
+  otpResendCooldownMs: number;
+  otpMaxSends: number;
   adminWallets: string[];
   rpcUrl: string;
   contractAddress: string;
   adminPrivateKey: string;
-  twilio: TwilioConfig | null;
-  otpDemoDelivery: boolean;
+  smtp: SmtpConfig | null;
   merkleBatchSize: number;
   merkleBatchIntervalMs: number;
   breakerThreshold: number;
   breakerWindowMs: number;
 }
 
-export interface TwilioConfig {
-  accountSid: string;
-  authToken: string;
-  fromNumber: string;
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
 }
 
 const MINUTE_MS = 60_000;
 
 // TRD §11.3 (30 minute sessions, 1000 cached), §11.2 (5 minute nonces),
 // §5.5 (5 minute OTP, 3 attempts), §5.4 (16 events or 60 seconds) and §12.3
-// (circuit breaker: more than 50 anomalous attempts in 10 seconds).
+// (circuit breaker: more than 50 anomalous attempts in 10 seconds). A new code
+// can be asked for 30 seconds after the last one, three sends in all.
 const DEFAULTS = {
   port: 3001,
   sessionTtlMinutes: 30,
@@ -41,6 +45,9 @@ const DEFAULTS = {
   nonceTtlMinutes: 5,
   otpTtlMinutes: 5,
   otpMaxAttempts: 3,
+  otpResendCooldownSeconds: 30,
+  otpMaxSends: 3,
+  smtpPort: 587,
   merkleBatchSize: 16,
   merkleBatchIntervalMs: 60_000,
   breakerThreshold: 50,
@@ -59,12 +66,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): OrchestratorCo
     nonceTtlMs: readPositiveInteger(env, 'NONCE_TTL_MINUTES', DEFAULTS.nonceTtlMinutes) * MINUTE_MS,
     otpTtlMs: readPositiveInteger(env, 'OTP_TTL_MINUTES', DEFAULTS.otpTtlMinutes) * MINUTE_MS,
     otpMaxAttempts: readPositiveInteger(env, 'OTP_MAX_ATTEMPTS', DEFAULTS.otpMaxAttempts),
+    otpResendCooldownMs:
+      readPositiveInteger(env, 'OTP_RESEND_COOLDOWN_SECONDS', DEFAULTS.otpResendCooldownSeconds) * 1000,
+    otpMaxSends: readPositiveInteger(env, 'OTP_MAX_SENDS', DEFAULTS.otpMaxSends),
     adminWallets: readWalletList(env, 'ADMIN_WALLETS'),
     rpcUrl: readOptional(env, 'RPC_URL'),
     contractAddress: readContractAddress(env),
     adminPrivateKey: readOptional(env, 'ADMIN_PRIVATE_KEY'),
-    twilio: readTwilio(env),
-    otpDemoDelivery: readOptional(env, 'OTP_DEMO_DELIVERY').toLowerCase() === 'true',
+    smtp: readSmtp(env),
     merkleBatchSize: readPositiveInteger(env, 'MERKLE_BATCH_SIZE', DEFAULTS.merkleBatchSize),
     merkleBatchIntervalMs: readPositiveInteger(env, 'MERKLE_BATCH_MS', DEFAULTS.merkleBatchIntervalMs),
     breakerThreshold: readPositiveInteger(env, 'BREAKER_THRESHOLD', DEFAULTS.breakerThreshold),
@@ -125,13 +134,26 @@ function readContractAddress(env: NodeJS.ProcessEnv): string {
   }
 }
 
-function readTwilio(env: NodeJS.ProcessEnv): TwilioConfig | null {
-  const accountSid = readOptional(env, 'TWILIO_ACCOUNT_SID');
-  const authToken = readOptional(env, 'TWILIO_AUTH_TOKEN');
-  const fromNumber = readOptional(env, 'TWILIO_FROM_NUMBER');
-
-  if (!accountSid || !authToken || !fromNumber) {
+// No SMTP_HOST means no email: the code screen then says the code could not be
+// sent rather than pretending it was. A user name without a password is a
+// mistake worth stopping on, not something to discover at the first sign-in.
+function readSmtp(env: NodeJS.ProcessEnv): SmtpConfig | null {
+  const host = readOptional(env, 'SMTP_HOST');
+  if (!host) {
     return null;
   }
-  return { accountSid, authToken, fromNumber };
+
+  const user = readOptional(env, 'SMTP_USER');
+  const pass = readOptional(env, 'SMTP_PASS');
+  if (user && !pass) {
+    throw new Error('SMTP_PASS is required when SMTP_USER is set');
+  }
+
+  return {
+    host,
+    port: readPositiveInteger(env, 'SMTP_PORT', DEFAULTS.smtpPort),
+    user,
+    pass,
+    from: readOptional(env, 'SMTP_FROM') || user || 'no-reply@demo-bank.local',
+  };
 }

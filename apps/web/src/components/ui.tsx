@@ -58,7 +58,7 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
 
 const DECISION_BADGES: Record<Decision, { tone: Tone; label: string }> = {
   allow: { tone: 'success', label: 'Signature' },
-  otp_required: { tone: 'warning', label: 'SMS code' },
+  otp_required: { tone: 'warning', label: 'Email code' },
   blocked: { tone: 'danger', label: 'Blocked' },
 };
 

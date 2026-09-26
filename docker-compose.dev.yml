@@ -1,28 +1,53 @@
-# Development-only overlay: publishes the internal services on the loopback address
-# so the seed and scenario scripts can reach them from the host.
+# Development and demonstration overlay: publishes the internal services on the
+# loopback address so the seed and scenario scripts can reach them from the host,
+# and adds a local mail server so step-up codes can be read without an email
+# account.
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-# The demo and the Phase 1 review run on docker-compose.yml alone.
+# The live demonstration (REVIEWER_DEMO_GUIDE.md) uses this overlay. Never use it
+# anywhere shared: its mail inbox and the internal ports have no login.
 
 services:
   orchestrator:
     ports:
       - "127.0.0.1:3001:3001"
     environment:
-      # No SMS provider runs in the lab, so the step-up code would reach nobody
-      # and the route could not be finished by hand. Here the code is written to
-      # `docker compose logs orchestrator` instead. Only this overlay sets it:
-      # docker-compose.yml on its own never writes a code anywhere.
-      OTP_DEMO_DELIVERY: "true"
+      # Step-up codes go to Mailpit, whose inbox is at http://localhost:8025.
+      # With SMTP_HOST set in .env (a real provider), that server is used
+      # instead and the codes reach real inboxes.
+      SMTP_HOST: "${SMTP_HOST:-mailpit}"
+    depends_on:
+      mailpit:
+        condition: service_started
+
+  # Catches every email the orchestrator sends and shows it in a web inbox.
+  # Nothing leaves this machine. It listens on 587, the port a real provider
+  # uses, so the orchestrator's default fits both.
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    environment:
+      MP_SMTP_BIND_ADDR: "0.0.0.0:587"
+    ports:
+      - "127.0.0.1:8025:8025"
+
+  # Every lab client (the browser, the seeder, the scripts, every teammate on
+  # this machine) reaches the gateway from the one Docker address, so all of
+  # them share one token bucket. The TRD values (10, then one every 3 s) stay in
+  # .env for anything shared; the lab gets a larger bucket so a team rehearsing
+  # does not lock itself out. Rate limiting stays on: a burst past 60 is still
+  # answered 429.
+  gateway:
+    environment:
+      TOKEN_BUCKET_CAPACITY: "60"
+      TOKEN_BUCKET_REFILL_INTERVAL_MS: "1000"
 
   risk-engine:
     ports:
       - "127.0.0.1:8001:8001"
     environment:
-      # The velocity rule counts attempts per source address. In the lab the
-      # browser, the demo scripts and the seeder all reach the gateway from the
-      # one Docker address, so the TRD default of 5 fires on ordinary
-      # demonstration clicking and blocks sign-ins that should have been routed
-      # to the code step. 10 leaves room for a demonstration while still
-      # catching S5, which sends far more than that from its own address.
+      # The velocity rule counts attempts per source address, and in the lab
+      # every client shares one address, so the TRD default of 5 fires on
+      # ordinary rehearsing and blocks sign-ins that should reach the code step.
+      # 20 leaves room for a team while still catching S5, which sends 80 from
+      # its own address: 60 of them are blocked, more than the breaker's 50.
       # docker-compose.yml keeps the documented default of 5.
-      VELOCITY_THRESHOLD: "10"
+      VELOCITY_THRESHOLD: "20"

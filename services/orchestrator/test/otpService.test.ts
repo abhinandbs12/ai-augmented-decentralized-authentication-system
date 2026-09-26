@@ -13,6 +13,8 @@ interface StoredChallenge {
   attempts: number;
   verified: boolean;
   expired: boolean;
+  sentAt: Date;
+  sendCount: number;
 }
 
 // The service is exercised against an in-memory stand-in for the table, so the
@@ -25,10 +27,18 @@ vi.mock('../src/db/otpChallenges', () => ({
     challenge: { walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string; factors: string[] },
   ) => {
     const id = `00000000-0000-4000-8000-${String(challenges.size + 1).padStart(12, '0')}`;
-    challenges.set(id, { id, ...challenge, attempts: 0, verified: false, expired: false });
+    challenges.set(id, { id, ...challenge, attempts: 0, verified: false, expired: false, sentAt: new Date(), sendCount: 1 });
     return id;
   },
   findOtpChallenge: async (_pool: Pool, id: string) => challenges.get(id) ?? null,
+  replaceOtpCode: async (_pool: Pool, id: string, replacement: { codeHash: string; sendCount: number }) => {
+    const challenge = challenges.get(id);
+    if (!challenge || challenge.verified || challenge.sendCount !== replacement.sendCount) {
+      return false;
+    }
+    Object.assign(challenge, { codeHash: replacement.codeHash, expired: false, sentAt: new Date(), sendCount: challenge.sendCount + 1 });
+    return true;
+  },
   countFailedAttempt: async (_pool: Pool, id: string) => {
     const challenge = challenges.get(id);
     if (!challenge) {
@@ -51,15 +61,15 @@ vi.mock('../src/db/otpChallenges', () => ({
 }));
 
 const pool = {} as Pool;
-const OPTIONS = { ttlMs: 300_000, maxAttempts: 3 };
+const OPTIONS = { ttlMs: 300_000, maxAttempts: 3, resendCooldownMs: 30_000, maxSends: 3 };
 const WALLET = '0xab12ab12ab12ab12ab12ab12ab12ab12ab12ab12';
-const PHONE = '+919876543210';
+const EMAIL = 'asha@example.com';
 const DEVICE = 'a3f1'.repeat(16);
 const ATTEMPT = { trustScore: 71, deviceFingerprint: DEVICE, factors: ['unrecognized_device'] };
 
 function createSender(): OtpSender & { sent: string[] } {
   const sent: string[] = [];
-  return { sent, channel: 'sms', send: async (_phone, code) => void sent.push(code) };
+  return { sent, channel: 'email', send: async (_to, code) => void sent.push(code) };
 }
 
 describe('OtpService', () => {
@@ -71,11 +81,13 @@ describe('OtpService', () => {
   });
 
   describe('start', () => {
-    it('sends a six-digit code and stores only its hash', async () => {
+    it('emails a six-digit code and stores only its hash', async () => {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
 
-      const challengeId = await service.start(WALLET, PHONE, ATTEMPT);
+      const { challengeId, delivery } = await service.start(WALLET, EMAIL, ATTEMPT);
+
+      expect(delivery).toBe('email');
 
       const [code] = sender.sent;
       expect(code).toMatch(/^\d{6}$/);
@@ -85,27 +97,44 @@ describe('OtpService', () => {
       expect(stored?.trustScore).toBe(71);
     });
 
-    it('still creates the challenge when there is no phone number on file', async () => {
+    it('still creates the challenge when there is no email address on file, and says nothing was sent', async () => {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
 
-      const challengeId = await service.start(WALLET, null, ATTEMPT);
+      const { challengeId, delivery } = await service.start(WALLET, null, ATTEMPT);
 
       expect(challenges.has(challengeId)).toBe(true);
+      expect(delivery).toBe('none');
       expect(sender.sent).toEqual([]);
     });
 
-    // Delivery failing must never turn a step-up into an allow: the login
-    // simply cannot continue without the code.
-    it('does not fail the request when delivery fails', async () => {
+    it('says nothing was sent when no mail server is configured', async () => {
       const service = new OtpService(pool, OPTIONS, {
-        channel: 'sms',
+        channel: 'none',
         send: async () => {
-          throw new Error('Twilio returned HTTP 500');
+          throw new Error('Email is not configured');
         },
       });
 
-      await expect(service.start(WALLET, PHONE, ATTEMPT)).resolves.toMatch(/^[0-9a-f-]+$/);
+      await expect(service.start(WALLET, EMAIL, ATTEMPT)).resolves.toMatchObject({ delivery: 'none' });
+    });
+
+    // Delivery failing must never turn a step-up into an allow: the login
+    // simply cannot continue without the code, and the screen says so.
+    it('does not fail the request when delivery fails, and reports the failure', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const service = new OtpService(pool, OPTIONS, {
+        channel: 'email',
+        send: async () => {
+          throw new Error('connection refused');
+        },
+      });
+
+      const started = await service.start(WALLET, EMAIL, ATTEMPT);
+
+      expect(started.challengeId).toMatch(/^[0-9a-f-]+$/);
+      expect(started.delivery).toBe('failed');
+      expect(JSON.stringify(error.mock.calls)).not.toMatch(/\b\d{6}\b/);
     });
   });
 
@@ -113,7 +142,7 @@ describe('OtpService', () => {
     async function startChallenge(): Promise<{ service: OtpService; challengeId: string; code: string }> {
       const sender = createSender();
       const service = new OtpService(pool, OPTIONS, sender);
-      const challengeId = await service.start(WALLET, PHONE, ATTEMPT);
+      const { challengeId } = await service.start(WALLET, EMAIL, ATTEMPT);
       return { service, challengeId, code: sender.sent[0] };
     }
 
@@ -186,6 +215,35 @@ describe('OtpService', () => {
       const result = await service.verify(challengeId, '1234567');
 
       expect(result.status).toBe('invalid');
+    });
+  });
+
+  describe('resend', () => {
+    const emailOf = async () => EMAIL;
+
+    it('refuses before the cooldown and counts down the wait', async () => {
+      const sender = createSender();
+      const service = new OtpService(pool, OPTIONS, sender);
+      const { challengeId } = await service.start(WALLET, EMAIL, ATTEMPT);
+      challenges.get(challengeId)!.sentAt = new Date(Date.now() - 20_000);
+
+      const outcome = await service.resend(challengeId, emailOf);
+
+      expect(outcome).toEqual({ status: 'too_soon', retryAfterSeconds: 10 });
+      expect(sender.sent).toHaveLength(1);
+    });
+
+    // Two requests read the same count; the store lets only one replace the code.
+    it('sends one code when two requests race', async () => {
+      const sender = createSender();
+      const service = new OtpService(pool, OPTIONS, sender);
+      const { challengeId } = await service.start(WALLET, EMAIL, ATTEMPT);
+      challenges.get(challengeId)!.sentAt = new Date(Date.now() - 31_000);
+
+      const outcomes = await Promise.all([service.resend(challengeId, emailOf), service.resend(challengeId, emailOf)]);
+
+      expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(['sent', 'too_soon']);
+      expect(sender.sent).toHaveLength(2);
     });
   });
 });
