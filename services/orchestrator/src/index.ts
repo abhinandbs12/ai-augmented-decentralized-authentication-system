@@ -10,10 +10,12 @@ import type { CachedSession } from './core/loginStateMachine';
 import { NonceService } from './core/nonces';
 import { createRiskEngineClient } from './core/riskEngineClient';
 import { SessionStore } from './core/sessions';
+import { rebuildChainState } from './core/chainRebuild';
+import { startChallengeCleanup } from './core/challengeCleanup';
 import { createPool, runMigrations } from './db/pool';
 import { LRUCache } from './ds/lruCache';
 import { OtpService } from './otp/otpService';
-import { createOtpSender } from './otp/sender';
+import { createEmailSender } from './otp/emailSender';
 import { createRealtime, silentRealtime, type Realtime } from './realtime/socket';
 
 async function start(): Promise<void> {
@@ -22,6 +24,7 @@ async function start(): Promise<void> {
   const pool = createPool(config.databaseUrl);
   const applied = await runMigrations(pool);
   console.log(applied.length > 0 ? `Applied migrations: ${applied.join(', ')}` : 'Database schema is up to date');
+  const stopChallengeCleanup = startChallengeCleanup(pool);
 
   const mongoClient = new MongoClient(config.mongoUrl);
   await mongoClient.connect();
@@ -49,16 +52,18 @@ async function start(): Promise<void> {
     close: () => broadcaster.close(),
   };
 
+  const sessions = new SessionStore(pool, sessionCache, config.sessionTtlMs);
   const breaker = createCircuitBreaker({
     threshold: config.breakerThreshold,
     windowMs: config.breakerWindowMs,
     trip: async () => {
       await chain.pauseAuth();
-      console.warn('Circuit breaker tripped: authentication paused');
+      // As with an administrator's pause: customer sessions end (TRD §11.3).
+      const ended = await sessions.revokeAllExcept(config.adminWallets);
+      console.warn(`Circuit breaker tripped: authentication paused, ${ended} customer sessions ended`);
       realtime.emitSystem('paused', 'circuit breaker');
     },
   });
-  const sessions = new SessionStore(pool, sessionCache, config.sessionTtlMs);
 
   const app = createApp({
     pool,
@@ -68,8 +73,13 @@ async function start(): Promise<void> {
     nonces: new NonceService(pool, config.nonceTtlMs),
     otp: new OtpService(
       pool,
-      { ttlMs: config.otpTtlMs, maxAttempts: config.otpMaxAttempts },
-      createOtpSender({ twilio: config.twilio, demoDelivery: config.otpDemoDelivery }),
+      {
+        ttlMs: config.otpTtlMs,
+        maxAttempts: config.otpMaxAttempts,
+        resendCooldownMs: config.otpResendCooldownMs,
+        maxSends: config.otpMaxSends,
+      },
+      createEmailSender(config.smtp, Math.round(config.otpTtlMs / 60_000)),
     ),
     chain,
     riskEngine: createRiskEngineClient(config.riskEngineUrl),
@@ -87,20 +97,33 @@ async function start(): Promise<void> {
     return session !== null && config.adminWallets.includes(session.walletAddress.toLowerCase());
   });
 
+  // Before accepting sign-ins: a restarted development chain is given back the
+  // registrations and Merkle roots that PostgreSQL holds (core/chainRebuild.ts).
+  try {
+    const rebuilt = await rebuildChainState(pool, chain);
+    if (rebuilt.registered + rebuilt.anchored > 0) {
+      console.log(
+        `Rebuilt the chain state from PostgreSQL: ${rebuilt.registered} wallets registered, ` +
+          `${rebuilt.anchored} Merkle roots anchored`,
+      );
+    }
+  } catch (error) {
+    console.error(`Could not rebuild the chain state: ${(error as Error).message}`);
+  }
+
   server.listen(config.port, () => {
     console.log(`Orchestrator listening on port ${config.port}`);
     console.log(`  Risk engine:  ${config.riskEngineUrl}`);
     console.log(`  Contract:     ${config.contractAddress || 'not configured'}`);
     console.log(`  Admin wallets: ${config.adminWallets.length}`);
     console.log(
-      `  SMS delivery: ${
-        config.twilio ? 'Twilio' : config.otpDemoDelivery ? 'demo, codes written to this log' : 'not configured'
-      }`,
+      `  Email delivery: ${config.smtp ? `SMTP ${config.smtp.host}:${config.smtp.port}` : 'not configured'}`,
     );
     void warnIfContractMissing(config.rpcUrl, config.contractAddress);
   });
 
   const shutdown = async (): Promise<void> => {
+    stopChallengeCleanup();
     batcher.stop();
     await batcher.flush().catch(() => undefined);
     await realtime.close();

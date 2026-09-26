@@ -7,16 +7,24 @@
 
 [![Status](https://img.shields.io/badge/status-academic%20project-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity)]()
+[![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.25-363636?logo=solidity)]()
 [![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=node.js&logoColor=white)]()
 [![Python](https://img.shields.io/badge/Python-FastAPI-3776AB?logo=python&logoColor=white)]()
-[![React](https://img.shields.io/badge/React-Three.js-61DAFB?logo=react&logoColor=black)]()
-[![Flutter](https://img.shields.io/badge/Flutter-Mobile-02569B?logo=flutter&logoColor=white)]()
+[![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=black)]()
+[![Flutter](https://img.shields.io/badge/Flutter-Phase%202-02569B?logo=flutter&logoColor=white)]()
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)]()
 
 **Final Year Project -- Department of Computer Science & Engineering**
 
 </div>
+
+> **Status (Phase 1):** wallet sign-in (MetaMask, or a key pair created in the
+> browser) with on-chain signature verification,
+> rule-based Trust Scoring with graph proximity, the email-code step, the circuit
+> breaker and the Merkle audit trail run today; see
+> [PHASE1_COMPLETION_REPORT.md](PHASE1_COMPLETION_REPORT.md) and
+> [REVIEWER_DEMO_GUIDE.md](REVIEWER_DEMO_GUIDE.md). Items marked *(Phase 2)* below
+> are designed but not built yet.
 
 ---
 
@@ -51,9 +59,9 @@
 
 Password-based authentication remains one of the most exploited attack surfaces on the web. Centralized credential stores are a single point of failure, every login receives identical scrutiny regardless of actual risk, and conventional audit logs can be silently altered after the fact.
 
-This project replaces passwords entirely with **blockchain-anchored cryptographic identity**. Users authenticate by signing a one-time challenge with a private key that never leaves their device; a smart contract verifies that signature on-chain. Layered on top is an **AI Risk Engine** that scores every login attempt in real time and decides how much friction is warranted — none, an SMS one-time-passcode, or an outright block — plus a **graph-based fraud detection module** that traces relationships between wallets, IPs, and devices to catch coordinated fraud rings, not just individual bad actors.
+This project replaces passwords entirely with **blockchain-anchored cryptographic identity**. Users authenticate by signing a one-time challenge with a private key that never leaves their device; a smart contract verifies that signature on-chain. Layered on top is an **AI Risk Engine** that scores every login attempt in real time and decides how much friction is warranted — none, an emailed one-time passcode, or an outright block — plus a **graph-based fraud detection module** that traces relationships between wallets, IPs, and devices to catch coordinated fraud rings, not just individual bad actors.
 
-Classic data structures and algorithms — a **Merkle tree** for tamper-evident audit batching, an **LRU cache** for O(1) session validation, a **token bucket** for rate limiting, and a **min-heap** for risk-ranked triage — keep the system efficient enough for real deployment rather than remaining a toy demo.
+Classic data structures and algorithms — a **Merkle tree** for tamper-evident audit batching, an **LRU cache** for O(1) session validation, a **token bucket** for rate limiting, and a **min-heap** for risk-ranked triage *(Phase 2; Phase 1 uses a sorted query)* — keep the system efficient enough for real deployment rather than remaining a toy demo.
 
 > **The result:** more secure than passwords (nothing secret is ever transmitted or stored server-side), more adaptive than static authentication (friction scales with measured risk), and more auditable than conventional logging (a blockchain-anchored Merkle root makes tampering with historical records cryptographically detectable).
 
@@ -84,14 +92,14 @@ Classic data structures and algorithms — a **Merkle tree** for tamper-evident 
 
 ## Key Features
 
-- **Passwordless, wallet-based identity** — register and log in via a public/private key pair (MetaMask / WalletConnect), with optional WebAuthn/passkey support
+- **Passwordless, wallet-based identity** — register and log in via a public/private key pair: MetaMask, or a key pair created in the browser and stored there encrypted with a passphrase (WalletConnect and WebAuthn/passkeys are Phase 2)
 - **Real-time AI Trust Scoring (0-100)** — every login is scored and routed: allow / OTP step-up / block
 - **Graph-based fraud ring detection** — bounded BFS across a wallet/IP/device adjacency graph flags coordinated attacks
 - **Blockchain-anchored audit trail** — Merkle-batched login events with on-chain roots and per-event proofs
 - **Circuit breaker** — an emergency `pauseAuth()` halts all authentication system-wide during a detected mass attack
-- **Live 3D threat graph** — React + Three.js force-directed visualization of login activity and flagged clusters
-- **Mobile biometric approval** — Flutter companion app for FaceID/fingerprint login approval
-- **Automated step-up verification** — n8n + Twilio workflow for SMS OTP and admin alerting
+- **Live 3D threat graph** *(Phase 2)* — React + Three.js force-directed visualization of login activity and flagged clusters
+- **Mobile biometric approval** *(Phase 2; `apps/mobile` is a placeholder)* — Flutter companion app for FaceID/fingerprint login approval
+- **Email step-up verification** — a 6-digit code emailed over SMTP (any provider; a local Mailpit inbox in the demo), with a 30-second cooldown before a new code; the n8n workflows and admin alerting are Phase 2
 - **One-command local deployment** — full stack via Docker Compose
 
 ---
@@ -102,14 +110,14 @@ The system follows a **layered, service-oriented architecture**. A client layer 
 
 | Layer | Responsibility |
 |-------|-----------------|
-| **Client Layer** | React web app (3D vault UI, wallet connect) + Flutter mobile app (biometric approval) |
+| **Client Layer** | React web app (wallet sign-in, operations console); Flutter mobile app *(Phase 2)* |
 | **API Gateway** | Express.js gateway — token-bucket rate limiting and request validation |
 | **Backend Orchestrator** | Node.js service coordinating cache, AI calls, blockchain calls, and event queueing |
 | **AI Risk Engine** | Python/FastAPI service computing Trust Score and running graph-based fraud analysis |
 | **Blockchain Layer** | Solidity smart contract — registration, signature verification, Merkle anchoring, pause |
-| **Automation Layer** | n8n workflows triggering Twilio SMS OTP and admin alerts |
-| **Data Layer** | Supabase (structured profiles) + MongoDB (unstructured behavioral telemetry) |
-| **Visualization Layer** | React + Three.js live 3D threat graph and admin dashboard |
+| **Automation Layer** | Email over SMTP for the code step, sent by the orchestrator; n8n workflows and admin alerts *(Phase 2)* |
+| **Data Layer** | PostgreSQL 16 (structured profiles; plain SQL that also runs on Supabase) + MongoDB (unstructured behavioral telemetry) |
+| **Visualization Layer** | React admin dashboard with live Socket.IO updates; Three.js 3D threat graph *(Phase 2)* |
 
 All backend services are containerized and orchestrated via **Docker Compose**, so the entire stack starts with a single command. Client apps run outside the container boundary since they execute on the user's own device.
 
@@ -119,15 +127,15 @@ All backend services are containerized and orchestrated via **Docker Compose**, 
 
 | Layer | Technology |
 |-------|------------|
-| Web Frontend | React, Three.js / WebGL |
-| Mobile Frontend | Flutter |
+| Web Frontend | React, Vite, Tailwind CSS (Three.js / WebGL graph: Phase 2) |
+| Mobile Frontend | Flutter *(Phase 2)* |
 | Backend Orchestrator | Node.js, Express.js |
-| AI Risk Engine | Python, FastAPI, scikit-learn (Isolation Forest) |
+| AI Risk Engine | Python, FastAPI, rule-based scorer (scikit-learn Isolation Forest: Phase 2) |
 | Blockchain | Solidity, Hardhat, ethers.js |
-| Structured Database | Supabase (PostgreSQL) with Edge Functions |
+| Structured Database | PostgreSQL 16 (Supabase-compatible) |
 | Unstructured Database | MongoDB |
-| Automation | n8n |
-| Messaging / OTP | Twilio |
+| Automation | n8n *(Phase 2)* |
+| Messaging / OTP | Email over SMTP (Nodemailer); Mailpit as the local inbox in the demo |
 | Containerization | Docker, Docker Compose |
 | Version Control / PM | GitHub, GitHub Projects |
 
@@ -155,10 +163,10 @@ Client                Gateway            Orchestrator          AI Engine        
   |                       |                    | 9. verifySignature()                  |
   |                       |                    | 10. Create + cache session            |
   |                       |                    | 11. Queue event for Merkle batching   |
-  |                       |                    | 12. Push update -> 3D threat graph    |
+  |                       |                    | 12. Push update -> admin dashboard    |
 ```
 
-**Circuit Breaker:** if anomalous logins within a rolling window exceed a configured threshold, the Orchestrator calls `pauseAuth()`, all further logins are rejected regardless of Trust Score, and an admin alert is dispatched — until an administrator explicitly resumes the system.
+**Circuit Breaker:** if anomalous logins within a rolling window exceed a configured threshold, the Orchestrator calls `pauseAuth()`, all further logins are rejected regardless of Trust Score, customer sessions end, and the admin dashboard is told live (the n8n admin alert is Phase 2) — until an administrator explicitly resumes the system.
 
 ---
 
@@ -190,7 +198,7 @@ Client                Gateway            Orchestrator          AI Engine        
 | Trust Score | Route |
 |-------------|-------|
 | **>= 90** | Straight to signature verification |
-| **50 - 89** | SMS OTP step-up, then signature verification |
+| **50 - 89** | Email OTP step-up, then signature verification |
 | **< 50** | Blocked and logged |
 
 **Upgrade path:** an **Isolation Forest** anomaly-detection model is the proposed successor to the rule-based baseline — it needs no labeled fraud data (scarce for a student project) and naturally isolates rare, anomalous feature combinations.
@@ -373,7 +381,7 @@ class RiskRankedAttempts:
 
 ## Smart Contract
 
-**Contract:** `AuthRegistry.sol` (Solidity `^0.8.20`, uses OpenZeppelin's audited ECDSA library)
+**Contract:** `AuthRegistry.sol` (Solidity `^0.8.25`, uses OpenZeppelin's audited ECDSA library)
 
 | Function | Description |
 |----------|-------------|
@@ -395,7 +403,7 @@ class RiskRankedAttempts:
 
 ```solidity
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
@@ -498,6 +506,7 @@ All endpoints are exposed by the Node.js Backend Orchestrator. Requests/response
 | `POST` | `/api/auth/register` | Registers a wallet on-chain and creates its off-chain profile |
 | `POST` | `/api/auth/login` | Starts a login: scores the attempt and returns `allow`, `otp_required` or `blocked`. The single-use nonce is returned with an `allow` |
 | `POST` | `/api/auth/otp/verify` | Verifies the OTP code for the medium-risk path and returns the nonce |
+| `POST` | `/api/auth/otp/resend` | Emails a new code for the same attempt, at most every 30 seconds and three codes in all; the old code stops working |
 | `POST` | `/api/auth/verify` | Submits the signed nonce, verifies it on-chain and creates the session |
 | `POST` | `/api/auth/logout` | Invalidates the current session |
 
@@ -546,7 +555,10 @@ Response:
 { "error": { "code": "RATE_LIMITED", "message": "Too many attempts. Please wait a moment.", "request_id": "7f3a..." } }
 ```
 
-### Risk and Graph
+### Risk and Graph *(Phase 2, not built yet)*
+
+Phase 1 exposes the score only inside each login response and the flags through
+`/api/admin/attempts/top`; these endpoints are planned for the 3D threat graph.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -558,6 +570,7 @@ Response:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/api/audit/events` | Recent login events, each with the batch that sealed it (or `null`) |
 | `GET` | `/api/audit/proof/:eventId` | Merkle proof for a specific login event |
 | `GET` | `/api/audit/root/:batchId` | On-chain Merkle root for a given batch |
 
@@ -579,15 +592,21 @@ Admin and audit endpoints require a session whose wallet is listed in
 **`GET /api/audit/proof/:eventId`**
 ```json
 {
-  "event_id": "evt_00931",
+  "event_id": "f266e00c-dcdd-48a5-8a86-d5bee4913099",
+  "batch_id": 2,
+  "leaf_index": 0,
   "leaf_hash": "0x4a7e...9d21",
-  "proof_path": ["0x88c1...a2", "0x0fd3...9e", "0x77bb...11"],
-  "merkle_root": "0x1234...abcd",
-  "verified": true
+  "current_leaf_hash": "0x4a7e...9d21",
+  "event": { "eventId": "f266e00c-...", "wallet": "0x7099...79c8", "ip": "...", "deviceFingerprint": "...", "trustScore": 100, "decision": "allow", "timestamp": "..." },
+  "siblings": [{ "hash": "0x88c1...a2", "position": "right" }]
 }
 ```
 
-**`GET /api/graph/cluster/:id`**
+The proof carries no verdict: the browser hashes `event` itself, folds
+`siblings` into a root and compares it with `GET /api/audit/root/:batchId`,
+which reads the root from the contract.
+
+**`GET /api/graph/cluster/:id`** *(Phase 2)*
 ```json
 {
   "cluster_id": "cluster_014",
@@ -610,13 +629,13 @@ Created by the numbered SQL files in `services/orchestrator/migrations/`, applie
 at startup. The schema is plain SQL, so the same files would run unchanged on
 Supabase's hosted PostgreSQL.
 
-**`users`** — `id (uuid, PK)`, `wallet_address (unique)`, `display_name`, `phone_number`, `created_at`, `last_login_at`
+**`users`** — `id (uuid, PK)`, `wallet_address (unique)`, `display_name`, `email`, `created_at`, `last_login_at`
 
 **`sessions`** — `id (uuid, PK)`, `user_id (FK)`, `token_hash (unique)`, `trust_score`, `issued_at`, `expires_at`, `revoked_at`
 
 **`nonces`** — `id (uuid, PK)`, `wallet_address`, `nonce_value`, `trust_score`, `device_fingerprint`, `used`, `expires_at`
 
-**`otp_challenges`** — `id (uuid, PK)`, `wallet_address`, `code_hash`, `trust_score`, `device_fingerprint`, `attempts`, `verified`, `expires_at`
+**`otp_challenges`** — `id (uuid, PK)`, `wallet_address`, `code_hash`, `trust_score`, `device_fingerprint`, `attempts`, `verified`, `expires_at`, `sent_at`, `send_count`
 
 **`audit_batches`** / **`audit_leaves`** — one row per anchored Merkle batch and one per leaf, so a proof can be rebuilt for any past event
 
@@ -638,7 +657,8 @@ make an unfamiliar device look familiar.
 
 | Storage Item | Description |
 |---|---|
-| `walletToPublicKey` mapping | Registered wallet to verified public key / DID |
+| `isRegistered` mapping | Wallets registered by the admin; `verifySignature` refuses any other |
+| `usedNonces` mapping | Per wallet, every nonce already consumed, so a signature cannot be replayed |
 | `merkleRoots` array | Append-only list of submitted audit-batch roots |
 | `paused` (bool) | Global circuit-breaker flag |
 | `admin` address | Address authorized to call `pauseAuth()` / `resumeAuth()` |
@@ -661,18 +681,18 @@ make an unfamiliar device look familiar.
 │   │   ├── Dockerfile
 │   │   └── package.json
 │   ├── orchestrator/                # Node.js backend (login flow, sessions, OTP, audit)
-│   │   ├── migrations/               # 001_users.sql … 005_audit_batches.sql
+│   │   ├── migrations/               # 001_users.sql … 007_email_otp.sql
 │   │   ├── src/routes/               # auth.ts, admin.ts, audit.ts
 │   │   ├── src/core/                 # loginStateMachine.ts, sessions.ts, nonces.ts
 │   │   ├── src/ds/lruCache.ts        # hand-written LRU cache
-│   │   ├── src/otp/                  # code generation, verification, Twilio delivery
+│   │   ├── src/otp/                  # code generation, verification, resend, email delivery
 │   │   ├── src/chain/                # ethers client for AuthRegistry
 │   │   ├── src/audit/                # merkleTree.ts, batcher.ts
 │   │   ├── Dockerfile
 │   │   └── package.json
 │   └── risk-engine/                 # Python / FastAPI risk scoring + threat graph (BFS)
 │       ├── app/
-│       │   ├── main.py              # FastAPI endpoints: POST /score, GET /health
+│       │   ├── main.py              # FastAPI endpoints: POST /score, POST /event, GET /health
 │       │   ├── features.py          # Feature extraction (device, region, time, velocity)
 │       │   ├── geo.py               # Offline IP geolocation lookup
 │       │   ├── scorers/rules.py     # Rule-based Trust Score calculator
@@ -680,21 +700,21 @@ make an unfamiliar device look familiar.
 │       │       ├── threat_graph.py  # Adjacency-list graph (wallet/IP/device nodes)
 │       │       └── bfs.py           # Bounded BFS (3-hop fraud proximity)
 │       ├── data/demo_geo_overrides.json
-│       ├── tests/                   # pytest suite (50 tests)
+│       ├── tests/                   # pytest suite (63 tests)
 │       ├── requirements.txt
 │       └── Dockerfile
 ├── apps/
-│   ├── web/                         # React + Three.js dashboard and identity vault UI
+│   ├── web/                         # React sign-in UI and operations console
 │   │   ├── src/
 │   │   │   ├── App.tsx
 │   │   │   └── pages/admin/Attempts.tsx
 │   │   └── package.json
-│   └── mobile/                      # Flutter companion app (biometric approval)
+│   └── mobile/                      # Flutter companion app: placeholder (Phase 2)
 │       └── lib/main.dart
 ├── scripts/
 │   ├── seed.ts                      # Demo data seeder (5 wallets + 1 fraud ring)
 │   └── scenarios/s1.ts - s6.ts      # Scripted demo scenarios (PRD S1-S6)
-├── automation/n8n/workflows/        # n8n workflows (OTP step-up, admin alerts)
+├── automation/n8n/workflows/        # n8n workflows (Phase 2; empty today)
 ├── docker-compose.yml               # Single-command full-stack orchestration
 ├── docker-compose.dev.yml           # Development overlay: publishes 3001 and 8001 locally
 ├── .env.example                     # Environment variable template
@@ -711,7 +731,7 @@ make an unfamiliar device look familiar.
 - Node.js (LTS)
 - Python 3.10+
 - MetaMask (or compatible wallet extension) for local testing
-- Twilio trial account credentials (for OTP demo)
+- Optional: an SMTP account (for example Gmail with an App Password) to email codes to real inboxes; the demo uses a local Mailpit inbox and needs none
 
 ### Local Deployment
 
@@ -722,21 +742,23 @@ cd ai-augmented-decentralized-authentication-system
 
 # 2. Configure environment variables
 cp .env.example .env
-# Set ADMIN_WALLETS and INTERNAL_API_TOKEN. Twilio values are only needed to
-# deliver the SMS code; everything else has a working default.
+# Set ADMIN_WALLETS and INTERNAL_API_TOKEN. The SMTP values are only needed to
+# email the step-up code to real inboxes; everything else has a working default.
 #
-# Without Twilio the step-up code reaches nobody, so plain `docker compose up`
-# cannot finish that route by hand. The development overlay below sets
-# OTP_DEMO_DELIVERY=true, which writes the code to the orchestrator's log for a
-# demonstration. It is off by default and should stay off anywhere else.
+# Without SMTP settings the step-up code reaches nobody, so plain
+# `docker compose up` cannot finish that route by hand. The development overlay
+# below adds Mailpit, a local mail server whose inbox is http://localhost:8025,
+# and sends every code there.
 
 # 3. Build and start the whole stack
 docker compose build
 docker compose up
 
 # The chain, the contract deployment, both databases, the risk engine, the
-# orchestrator and the gateway all start in order. Only the gateway (3000) and
-# the Hardhat RPC port (8545) are published to the host.
+# orchestrator and the gateway all start in order. Only the gateway (3000) is
+# published to the network; the Hardhat RPC (8545) is bound to 127.0.0.1.
+# The chain keeps its state in memory: after a restart the orchestrator
+# re-registers every customer and re-anchors every audit root from PostgreSQL.
 
 # 4. Start the web app (it runs outside the containers)
 cd apps/web && npm install && npm run dev
@@ -747,7 +769,7 @@ cd apps/web && npm install && npm run dev
 
 The seed and scenario scripts talk to the orchestrator and the risk engine
 directly, so they need the development overlay that publishes those two ports
-on the loopback address:
+on the loopback address (and adds the Mailpit inbox at http://localhost:8025):
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
@@ -776,7 +798,7 @@ uvicorn app.main:app --port 8001    # Requires MongoDB running
 | Level | Description |
 |-------|-------------|
 | **Unit** | Token bucket refill logic, LRU eviction order, Merkle tree construction/proofs, isolated contract functions, risk scorer penalties, BFS distance computation, feature extraction |
-| **Integration** | Login flow across orchestrator to AI engine to blockchain client; OTP webhook to n8n to Twilio |
+| **Integration** | Login flow across orchestrator to AI engine to blockchain client; OTP email through an n8n workflow *(Phase 2)* |
 | **System / E2E** | Full login flow across all three Trust Score paths against the running Docker Compose stack |
 | **Security** | Replay attack attempts, rate-limit bypass attempts, simulated credential-stuffing bursts |
 

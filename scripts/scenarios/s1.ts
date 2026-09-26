@@ -38,11 +38,11 @@ async function main() {
     console.log("\n  ✅ PASS — Score >= 90, allow path taken as expected.");
   } else {
     console.log(`\n  ❌ FAIL — Expected score >= 90, got ${data.trust_score}.`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 main().catch((e) => {
   console.error("❌ FAIL:", e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

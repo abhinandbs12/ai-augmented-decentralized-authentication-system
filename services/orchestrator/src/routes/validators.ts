@@ -8,6 +8,10 @@ const HEX_32_BYTES = /^[0-9a-fA-F]{64}$/;
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const OTP_CODE = /^\d{6}$/;
+// Deliberately loose: one @, a dot in the domain, no spaces. The gateway checks
+// the full format; whether an address works is only known once mail arrives.
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL_LENGTH = 254;
 
 export const isWalletAddress = (value: unknown): value is string =>
   typeof value === 'string' && WALLET_ADDRESS.test(value);
@@ -22,6 +26,9 @@ export const isUuid = (value: unknown): value is string => typeof value === 'str
 
 export const isOtpCode = (value: unknown): value is string =>
   typeof value === 'string' && OTP_CODE.test(value);
+
+export const isEmail = (value: unknown): value is string =>
+  typeof value === 'string' && value.length <= MAX_EMAIL_LENGTH && EMAIL.test(value.trim());
 
 // The address the gateway measured. Only the gateway can reach this service in
 // the deployed stack, and it replaces any client-supplied value, so the first

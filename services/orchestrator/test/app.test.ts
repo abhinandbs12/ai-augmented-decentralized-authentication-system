@@ -14,18 +14,18 @@ import { NonceService } from '../src/core/nonces';
 import type { RiskEngine } from '../src/core/riskEngineClient';
 import { SessionStore } from '../src/core/sessions';
 import { LRUCache } from '../src/ds/lruCache';
-import { OtpService } from '../src/otp/otpService';
+import { OtpService, type OtpSender } from '../src/otp/otpService';
 
 // ---- In-memory stand-ins for the four tables the routes touch -------------
 const tables = vi.hoisted(() => ({
-  users: new Map<string, { id: string; walletAddress: string; displayName: string | null; phoneNumber: string | null }>(),
+  users: new Map<string, { id: string; walletAddress: string; displayName: string | null; email: string | null }>(),
   nonces: new Map<string, { id: string; wallet: string; value: string; context: Record<string, unknown>; used: boolean; expired: boolean }>(),
   sessions: new Map<string, { walletAddress: string; userId: string; expiresAt: Date; revoked: boolean }>(),
-  otp: new Map<string, { id: string; walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string; factors: string[]; attempts: number; verified: boolean; expired: boolean }>(),
+  otp: new Map<string, { id: string; walletAddress: string; codeHash: string; trustScore: number; deviceFingerprint: string; factors: string[]; attempts: number; verified: boolean; expired: boolean; sentAt: Date; sendCount: number }>(),
 }));
 
 vi.mock('../src/db/users', () => ({
-  insertUser: async (_pool: Pool, user: { walletAddress: string; displayName?: string; phoneNumber?: string }) => {
+  insertUser: async (_pool: Pool, user: { walletAddress: string; displayName?: string; email: string }) => {
     const walletAddress = user.walletAddress.toLowerCase();
     if (tables.users.has(walletAddress)) {
       return null;
@@ -34,7 +34,7 @@ vi.mock('../src/db/users', () => ({
       id: randomUUID(),
       walletAddress,
       displayName: user.displayName ?? null,
-      phoneNumber: user.phoneNumber ?? null,
+      email: user.email,
     };
     tables.users.set(walletAddress, record);
     return record;
@@ -47,9 +47,15 @@ vi.mock('../src/db/users', () => ({
 vi.mock('../src/db/nonces', () => ({
   insertNonce: async (
     _pool: Pool,
-    { walletAddress, value, expiresAt: _expiresAt, ...context }: { walletAddress: string; value: string; expiresAt: Date },
+    {
+      id: requestedId,
+      walletAddress,
+      value,
+      expiresAt: _expiresAt,
+      ...context
+    }: { id?: string; walletAddress: string; value: string; expiresAt: Date },
   ) => {
-    const id = randomUUID();
+    const id = requestedId ?? randomUUID();
     tables.nonces.set(`${walletAddress.toLowerCase()}:${value}`, {
       id,
       wallet: walletAddress.toLowerCase(),
@@ -104,6 +110,15 @@ vi.mock('../src/db/sessions', () => ({
     stored.revoked = true;
     return true;
   },
+  revokeSessionsExcept: async (_pool: Pool, walletAddresses: string[]) => {
+    const ending = [...tables.sessions.values()].filter(
+      (stored) => !stored.revoked && !walletAddresses.includes(stored.walletAddress),
+    );
+    for (const stored of ending) {
+      stored.revoked = true;
+    }
+    return ending.length;
+  },
 }));
 
 vi.mock('../src/db/otpChallenges', () => ({
@@ -122,10 +137,25 @@ vi.mock('../src/db/otpChallenges', () => ({
       attempts: 0,
       verified: false,
       expired: false,
+      sentAt: new Date(),
+      sendCount: 1,
     });
     return id;
   },
   findOtpChallenge: async (_pool: Pool, id: string) => tables.otp.get(id) ?? null,
+  replaceOtpCode: async (_pool: Pool, id: string, replacement: { codeHash: string; sendCount: number }) => {
+    const challenge = tables.otp.get(id);
+    if (!challenge || challenge.verified || challenge.sendCount !== replacement.sendCount) {
+      return false;
+    }
+    Object.assign(challenge, {
+      codeHash: replacement.codeHash,
+      expired: false,
+      sentAt: new Date(),
+      sendCount: challenge.sendCount + 1,
+    });
+    return true;
+  },
   countFailedAttempt: async (_pool: Pool, id: string) => {
     const challenge = tables.otp.get(id);
     if (!challenge) {
@@ -162,6 +192,7 @@ const ADMIN_WALLET = '0xad00ad00ad00ad00ad00ad00ad00ad00ad00ad00';
 const DEVICE = 'a3f1'.repeat(16);
 const SIGNATURE = `0x${'cd'.repeat(65)}`;
 const INTERNAL_TOKEN = 'internal-token-for-tests';
+const EMAIL = 'asha@example.com';
 
 interface TestContext {
   app: ReturnType<typeof createApp>;
@@ -170,8 +201,10 @@ interface TestContext {
   reported: LoginEventReport[];
   anchored: AuditEvent[];
   sessions: SessionStore;
+  emails: { to: string; code: string }[];
   setScore(trustScore: number, reasons?: string[]): void;
   failScoring(): void;
+  failEmail(): void;
 }
 
 function fakeCollection(documents: Record<string, unknown>[]) {
@@ -206,6 +239,7 @@ function createTestApp(): TestContext {
 
   const chain: AuthRegistryClient = {
     registerUser: vi.fn(async () => ({ txHash: '0xregister' })),
+    isRegistered: vi.fn(async () => true),
     verifySignature: vi.fn(async () => ({ txHash: '0xverify' })),
     submitMerkleRoot: vi.fn(async () => ({ txHash: '0xanchor', batchId: 0 })),
     getMerkleRoot: vi.fn(async () => '0x' + '33'.repeat(32)),
@@ -232,6 +266,19 @@ function createTestApp(): TestContext {
     collection: (name: string) => (name === 'login_events' ? fakeCollection(loginEvents) : fakeCollection([])),
   } as unknown as Db;
 
+  // Stands in for the mail server: the test reads the code the customer would.
+  const emails: { to: string; code: string }[] = [];
+  let emailWorks = true;
+  const mailbox: OtpSender = {
+    channel: 'email',
+    send: async (to, code) => {
+      if (!emailWorks) {
+        throw new Error('connection refused');
+      }
+      emails.push({ to, code });
+    },
+  };
+
   const system: string[] = [];
   const breaker = createCircuitBreaker({
     threshold: 3,
@@ -247,7 +294,7 @@ function createTestApp(): TestContext {
     sessions,
     sessionCache,
     nonces: new NonceService(pool, 5 * 60_000),
-    otp: new OtpService(pool, { ttlMs: 5 * 60_000, maxAttempts: 3 }, { channel: 'sms', send: async () => undefined }),
+    otp: new OtpService(pool, { ttlMs: 5 * 60_000, maxAttempts: 3, resendCooldownMs: 30_000, maxSends: 3 }, mailbox),
     chain,
     riskEngine,
     events,
@@ -265,11 +312,15 @@ function createTestApp(): TestContext {
     reported,
     anchored,
     sessions,
+    emails,
     setScore: (trustScore, reasons = []) => {
       score = { trustScore, reasons };
     },
     failScoring: () => {
       score = null;
+    },
+    failEmail: () => {
+      emailWorks = false;
     },
   };
 }
@@ -277,7 +328,7 @@ function createTestApp(): TestContext {
 async function registerWallet(context: TestContext, walletAddress = WALLET): Promise<void> {
   await request(context.app)
     .post('/api/auth/register')
-    .send({ wallet_address: walletAddress, phone_number: '+919876543210' });
+    .send({ wallet_address: walletAddress, email: EMAIL });
 }
 
 async function loginAndVerify(context: TestContext, walletAddress = WALLET): Promise<string> {
@@ -349,24 +400,40 @@ describe('orchestrator app', () => {
     it('registers the customer wallet on-chain and creates the profile', async () => {
       const response = await request(context.app)
         .post('/api/auth/register')
-        .send({ wallet_address: WALLET, display_name: 'Asha', phone_number: '+919876543210' });
+        .send({ wallet_address: WALLET, display_name: 'Asha', email: ' Asha@Example.com ' });
 
       expect(response.status).toBe(201);
       expect(response.body).toEqual({ wallet_address: WALLET.toLowerCase(), registered: true, tx_hash: '0xregister' });
       expect(context.chain.registerUser).toHaveBeenCalledWith(WALLET);
+      expect(tables.users.get(WALLET.toLowerCase())?.email).toBe(EMAIL);
+    });
+
+    // The code of a step-up sign-in can only reach the customer by email.
+    it('refuses a registration without a valid email address, before touching the chain', async () => {
+      const missing = await request(context.app).post('/api/auth/register').send({ wallet_address: WALLET });
+      const malformed = await request(context.app)
+        .post('/api/auth/register')
+        .send({ wallet_address: WALLET, email: 'not-an-address' });
+
+      expect([missing.status, malformed.status]).toEqual([400, 400]);
+      expect(context.chain.registerUser).not.toHaveBeenCalled();
     });
 
     it('rejects a second registration of the same wallet (FR-04)', async () => {
       await registerWallet(context);
 
-      const response = await request(context.app).post('/api/auth/register').send({ wallet_address: WALLET });
+      const response = await request(context.app)
+        .post('/api/auth/register')
+        .send({ wallet_address: WALLET, email: EMAIL });
 
       expect(response.status).toBe(409);
       expect(response.body.error.code).toBe('ALREADY_REGISTERED');
     });
 
     it('rejects a malformed wallet address', async () => {
-      const response = await request(context.app).post('/api/auth/register').send({ wallet_address: '0x123' });
+      const response = await request(context.app)
+        .post('/api/auth/register')
+        .send({ wallet_address: '0x123', email: EMAIL });
 
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe('INVALID_REQUEST');
@@ -377,7 +444,9 @@ describe('orchestrator app', () => {
         new ChainError('CHAIN_UNAVAILABLE', 'no rpc'),
       );
 
-      const response = await request(context.app).post('/api/auth/register').send({ wallet_address: WALLET });
+      const response = await request(context.app)
+        .post('/api/auth/register')
+        .send({ wallet_address: WALLET, email: EMAIL });
 
       expect(response.status).toBe(502);
       expect(response.body.error.code).toBe('CHAIN_UNAVAILABLE');
@@ -390,7 +459,9 @@ describe('orchestrator app', () => {
         new ChainError('ALREADY_REGISTERED', 'AuthRegistry: already registered'),
       );
 
-      const response = await request(context.app).post('/api/auth/register').send({ wallet_address: WALLET });
+      const response = await request(context.app)
+        .post('/api/auth/register')
+        .send({ wallet_address: WALLET, email: EMAIL });
 
       expect(response.status).toBe(201);
       expect(response.body.tx_hash).toBeNull();
@@ -655,6 +726,71 @@ describe('orchestrator app', () => {
       });
     });
 
+    it('emails the code to the address on the account and says so', async () => {
+      const challengeId = await startOtpLogin();
+
+      expect(context.emails).toEqual([{ to: EMAIL, code: codeFor(challengeId) }]);
+    });
+
+    it('tells the customer when the code could not be emailed', async () => {
+      await registerWallet(context);
+      context.setScore(71);
+      context.failEmail();
+
+      const login = await request(context.app)
+        .post('/api/auth/login')
+        .send({ wallet_address: WALLET, device_fingerprint: DEVICE });
+
+      expect(login.body).toMatchObject({ decision: 'otp_required', otp_delivery: 'failed' });
+    });
+
+    // An account opened before email codes has no address: nothing was sent.
+    it('says no code was sent when the account has no email address', async () => {
+      tables.users.set(WALLET.toLowerCase(), {
+        id: randomUUID(),
+        walletAddress: WALLET.toLowerCase(),
+        displayName: null,
+        email: null,
+      });
+      context.setScore(71);
+
+      const login = await request(context.app)
+        .post('/api/auth/login')
+        .send({ wallet_address: WALLET, device_fingerprint: DEVICE });
+
+      expect(login.body).toMatchObject({ decision: 'otp_required', otp_delivery: 'none' });
+      expect(context.emails).toEqual([]);
+    });
+
+    it('reports an expired code as expired', async () => {
+      const challengeId = await startOtpLogin();
+      const code = codeFor(challengeId);
+      tables.otp.get(challengeId)!.expired = true;
+
+      const response = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code });
+
+      expect(response.status).toBe(410);
+      expect(response.body.error.code).toBe('OTP_EXPIRED');
+    });
+
+    it('records a step-up sign-in as one event, from the code step to the signature', async () => {
+      const challengeId = await startOtpLogin();
+
+      const otp = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: codeFor(challengeId) });
+      await request(context.app)
+        .post('/api/auth/verify')
+        .send({ wallet_address: WALLET, nonce: otp.body.nonce, signature: SIGNATURE });
+
+      const reports = context.reported.filter((report) => report.walletAddress.toLowerCase() === WALLET.toLowerCase());
+      expect(reports).toHaveLength(2);
+      expect(reports.map((report) => report.eventId)).toEqual([challengeId, challengeId]);
+      expect(reports.map((report) => report.verified)).toEqual([false, true]);
+    });
+
     it('counts a wrong code and says how many attempts remain', async () => {
       const challengeId = await startOtpLogin();
       const wrongCode = codeFor(challengeId) === '000000' ? '111111' : '000000';
@@ -694,6 +830,133 @@ describe('orchestrator app', () => {
         .send({ otp_challenge_id: challengeId, code: '12' });
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe('POST /api/auth/otp/resend', () => {
+    async function startOtpLogin(): Promise<string> {
+      await registerWallet(context);
+      context.setScore(71);
+      const login = await request(context.app)
+        .post('/api/auth/login')
+        .send({ wallet_address: WALLET, device_fingerprint: DEVICE });
+      expect(login.body).toMatchObject({ otp_delivery: 'email', resend_in_seconds: 30 });
+      return login.body.otp_challenge_id;
+    }
+
+    const resend = (challengeId: string) =>
+      request(context.app).post('/api/auth/otp/resend').send({ otp_challenge_id: challengeId });
+
+    // Moves the last send back past the cooldown instead of waiting for it.
+    const coolDown = (challengeId: string) => {
+      tables.otp.get(challengeId)!.sentAt = new Date(Date.now() - 31_000);
+    };
+
+    it('refuses a new code during the cooldown and says how long to wait', async () => {
+      const challengeId = await startOtpLogin();
+
+      const response = await resend(challengeId);
+
+      expect(response.status).toBe(429);
+      expect(response.body.error.code).toBe('OTP_RESEND_TOO_SOON');
+      expect(response.body.error.retry_after_seconds).toBeGreaterThan(0);
+      expect(response.body.error.retry_after_seconds).toBeLessThanOrEqual(30);
+      expect(response.headers['retry-after']).toBe(String(response.body.error.retry_after_seconds));
+      expect(context.emails).toHaveLength(1);
+    });
+
+    it('emails a new code after the cooldown, and only the newest code works', async () => {
+      const challengeId = await startOtpLogin();
+      const firstCode = context.emails[0].code;
+      coolDown(challengeId);
+
+      const response = await resend(challengeId);
+      const secondCode = context.emails[1].code;
+      const oldCode = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: firstCode === secondCode ? '000000' : firstCode });
+      const newCode = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: secondCode });
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({ otp_delivery: 'email', resend_in_seconds: 30 });
+      expect(context.emails.map((email) => email.to)).toEqual([EMAIL, EMAIL]);
+      expect(oldCode.body.error).toMatchObject({ code: 'OTP_INVALID', attempts_remaining: 2 });
+      expect(newCode.status).toBe(200);
+    });
+
+    // Wrong guesses belong to the challenge: asking for a new code must not
+    // hand out three more.
+    it('keeps the wrong guesses already made', async () => {
+      const challengeId = await startOtpLogin();
+      const wrongCode = context.emails[0].code === '000000' ? '111111' : '000000';
+      await request(context.app).post('/api/auth/otp/verify').send({ otp_challenge_id: challengeId, code: wrongCode });
+      coolDown(challengeId);
+      await resend(challengeId);
+      const nextWrong = context.emails[1].code === wrongCode ? '222222' : wrongCode;
+
+      const response = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: nextWrong });
+
+      expect(response.body.error).toMatchObject({ code: 'OTP_INVALID', attempts_remaining: 1 });
+    });
+
+    it('lets an expired code be replaced', async () => {
+      const challengeId = await startOtpLogin();
+      tables.otp.get(challengeId)!.expired = true;
+      coolDown(challengeId);
+
+      await resend(challengeId);
+      const response = await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: context.emails[1].code });
+
+      expect(response.status).toBe(200);
+    });
+
+    it('stops after three codes in all', async () => {
+      const challengeId = await startOtpLogin();
+      coolDown(challengeId);
+      await resend(challengeId);
+      coolDown(challengeId);
+      await resend(challengeId);
+      coolDown(challengeId);
+
+      const response = await resend(challengeId);
+
+      expect(response.status).toBe(429);
+      expect(response.body.error.code).toBe('OTP_RESEND_LIMIT');
+      expect(context.emails).toHaveLength(3);
+    });
+
+    it('says when the new code could not be emailed', async () => {
+      const challengeId = await startOtpLogin();
+      coolDown(challengeId);
+      context.failEmail();
+
+      const response = await resend(challengeId);
+
+      expect(response.status).toBe(200);
+      expect(response.body.otp_delivery).toBe('failed');
+    });
+
+    it('refuses a finished, unknown or malformed challenge', async () => {
+      const challengeId = await startOtpLogin();
+      await request(context.app)
+        .post('/api/auth/otp/verify')
+        .send({ otp_challenge_id: challengeId, code: context.emails[0].code });
+      coolDown(challengeId);
+
+      const finished = await resend(challengeId);
+      const unknown = await resend(randomUUID());
+      const malformed = await resend('not-a-uuid');
+
+      expect(finished.status).toBe(403);
+      expect(unknown.body.error.code).toBe('RISK_BLOCKED');
+      expect(malformed.status).toBe(400);
+      expect(context.emails).toHaveLength(1);
     });
   });
 
@@ -785,6 +1048,39 @@ describe('orchestrator app', () => {
       expect(resumed.body).toEqual({ paused: false, tx_hash: '0xresume' });
       expect(context.chain.pauseAuth).toHaveBeenCalledOnce();
       expect(context.chain.resumeAuth).toHaveBeenCalledOnce();
+    });
+
+    // TRD §11.3: a pause stops existing sessions too, not only new sign-ins.
+    it('ends customer sessions when paused, but keeps the administrator able to resume', async () => {
+      const customerToken = await loginAndVerify(context);
+      const adminToken = await loginAndVerify(context, ADMIN_WALLET);
+
+      const paused = await request(context.app)
+        .post('/api/admin/pause')
+        .set('Authorization', `Bearer ${adminToken}`);
+      const customer = await request(context.app)
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${customerToken}`);
+      const resumed = await request(context.app)
+        .post('/api/admin/resume')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(paused.status).toBe(200);
+      expect(customer.status).toBe(401);
+      expect(customer.body.error.code).toBe('SESSION_INVALID');
+      expect(resumed.status).toBe(200);
+    });
+
+    it('does not report a chain outage when the pause itself went through', async () => {
+      vi.spyOn(context.sessions, 'revokeAllExcept').mockRejectedValueOnce(new Error('database unavailable'));
+
+      const response = await request(context.app)
+        .post('/api/admin/pause')
+        .set('X-Internal-Token', INTERNAL_TOKEN);
+
+      expect(response.status).toBe(500);
+      expect(response.body.error.code).toBe('INTERNAL_ERROR');
+      expect(context.system).toEqual([]);
     });
   });
 

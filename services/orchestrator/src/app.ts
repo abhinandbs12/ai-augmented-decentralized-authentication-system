@@ -60,6 +60,8 @@ export function createApp(deps: AppDependencies): Express {
       chain: deps.chain,
       breaker: deps.breaker,
       realtime: deps.realtime,
+      sessions: deps.sessions,
+      adminWallets: deps.adminWallets,
       requireAdmin,
     }));
   app.use(

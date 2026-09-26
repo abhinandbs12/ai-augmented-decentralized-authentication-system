@@ -11,10 +11,12 @@ export class NonceService {
     private readonly ttlMs: number,
   ) {}
 
-  async issue(walletAddress: string, context: AttemptContext): Promise<IssuedNonce> {
+  // `attemptId` keeps a step-up sign-in one attempt: the nonce issued after the
+  // code takes the code challenge's id, which is the attempt's event id.
+  async issue(walletAddress: string, context: AttemptContext, attemptId?: string): Promise<IssuedNonce> {
     const nonce = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + this.ttlMs);
-    const challengeId = await insertNonce(this.pool, { walletAddress, value: nonce, expiresAt, ...context });
+    const challengeId = await insertNonce(this.pool, { id: attemptId, walletAddress, value: nonce, expiresAt, ...context });
 
     return { challengeId, nonce, expiresAt };
   }

@@ -66,6 +66,14 @@ export class LRUCache<K, V> {
     return true;
   }
 
+  // Pausing authentication ends sessions in bulk; entries that should survive
+  // are reloaded from Postgres on their next lookup.
+  clear(): void {
+    this.nodes.clear();
+    this.head = null;
+    this.tail = null;
+  }
+
   private moveToFront(node: CacheNode<K, V>): void {
     if (node === this.head) {
       return;

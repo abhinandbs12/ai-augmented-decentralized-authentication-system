@@ -15,6 +15,7 @@ export type ChainErrorCode =
   | 'AUTH_PAUSED'
   | 'NOT_REGISTERED'
   | 'ALREADY_REGISTERED'
+  | 'UNKNOWN_BATCH'
   | 'CHAIN_UNAVAILABLE';
 
 export class ChainError extends Error {
@@ -33,6 +34,7 @@ export interface TransactionResult {
 
 export interface AuthRegistryClient {
   registerUser(walletAddress: string): Promise<TransactionResult>;
+  isRegistered(walletAddress: string): Promise<boolean>;
   verifySignature(walletAddress: string, nonce: string, signature: string): Promise<TransactionResult>;
   submitMerkleRoot(root: string): Promise<TransactionResult & { batchId: number }>;
   getMerkleRoot(batchId: number): Promise<string>;
@@ -49,6 +51,7 @@ export interface ChainOptions {
 
 const AUTH_REGISTRY_ABI = [
   'function registerUser(address wallet)',
+  'function isRegistered(address wallet) view returns (bool)',
   'function verifySignature(address wallet, bytes32 nonce, bytes signature) returns (bool)',
   'function submitMerkleRoot(bytes32 root)',
   'function getMerkleRoot(uint256 batchId) view returns (bytes32)',
@@ -64,6 +67,7 @@ const CODE_FOR_REVERT_REASON: Record<string, ChainErrorCode> = {
   'AuthRegistry: authentication is paused': 'AUTH_PAUSED',
   'AuthRegistry: wallet not registered': 'NOT_REGISTERED',
   'AuthRegistry: already registered': 'ALREADY_REGISTERED',
+  'AuthRegistry: invalid batch id': 'UNKNOWN_BATCH',
 };
 
 export function toChainError(error: unknown): ChainError {
@@ -176,6 +180,14 @@ export function createAuthRegistryClient(options: ChainOptions): AuthRegistryCli
         throw toChainError(error);
       }
     },
+
+    async isRegistered(walletAddress) {
+      try {
+        return await registry.isRegistered(normalise(walletAddress));
+      } catch (error) {
+        throw toChainError(error);
+      }
+    },
   };
 }
 
@@ -208,6 +220,7 @@ function createUnconfiguredClient(): AuthRegistryClient {
 
   return {
     registerUser: unavailable,
+    isRegistered: unavailable,
     verifySignature: unavailable,
     submitMerkleRoot: unavailable,
     getMerkleRoot: unavailable,

@@ -3,7 +3,15 @@ import { join } from 'node:path';
 import { Pool } from 'pg';
 
 export function createPool(databaseUrl: string): Pool {
-  return new Pool({ connectionString: databaseUrl });
+  const pool = new Pool({ connectionString: databaseUrl });
+  // An idle connection fails when PostgreSQL restarts or the network drops.
+  // Unhandled, that error ends the process and every login with it. The pool
+  // already discards the broken client, so logging is enough: requests fail
+  // while the database is down and work again once it is back (TRD §14.4).
+  pool.on('error', (error) => {
+    console.error(`PostgreSQL connection lost: ${error.message}`);
+  });
+  return pool;
 }
 
 // Plain numbered .sql files, applied in order and recorded so a restart is a

@@ -126,7 +126,7 @@ describe('proxying to the orchestrator', () => {
     const response = await request(createGateway())
       .post('/api/auth/register')
       .set('X-Request-Id', 'client-chosen-id')
-      .send({ wallet_address: WALLET });
+      .send({ wallet_address: WALLET, email: 'asha@example.com' });
 
     const requestId = response.headers['x-request-id'];
     expect(requestId).toMatch(UUID_PATTERN);
@@ -137,7 +137,7 @@ describe('proxying to the orchestrator', () => {
     await request(createGateway())
       .post('/api/auth/register')
       .set('X-Forwarded-For', '198.51.100.7')
-      .send({ wallet_address: WALLET });
+      .send({ wallet_address: WALLET, email: 'asha@example.com' });
 
     expect(receivedRequests[0].headers['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
   });
@@ -155,7 +155,7 @@ describe('proxying to the orchestrator', () => {
     await request(createGateway())
       .post('/api/auth/register')
       .set('X-Internal-Token', 'stolen-or-guessed')
-      .send({ wallet_address: WALLET });
+      .send({ wallet_address: WALLET, email: 'asha@example.com' });
 
     expect(receivedRequests[0].headers['x-internal-token']).toBeUndefined();
   });
@@ -222,15 +222,35 @@ describe('proxying to the orchestrator', () => {
     expect(consoleError).toHaveBeenCalledOnce();
     consoleError.mockRestore();
   });
+
+  it('returns 503 with the error envelope when the orchestrator does not answer within 5 s', async () => {
+    const silentServer = createServer(() => undefined); // accepts the request, never answers
+    const silentUrl = await listen(silentServer);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const gateway = createApp({
+      orchestratorUrl: silentUrl,
+      tokenBucket: { capacity: 100, refillIntervalMs: 3000 },
+    });
+    const response = await request(gateway)
+      .post('/api/auth/login')
+      .send({ wallet_address: WALLET, device_fingerprint: FINGERPRINT });
+
+    expectErrorBody(response, 503, 'SERVICE_UNAVAILABLE');
+    consoleError.mockRestore();
+    silentServer.closeAllConnections();
+    await close(silentServer);
+  }, 10_000);
 });
 
 describe('request validation', () => {
   it.each([
-    ['/api/auth/register', { wallet_address: WALLET }],
-    ['/api/auth/register', { wallet_address: WALLET, display_name: 'Asha R', phone_number: '+919876543210' }],
+    ['/api/auth/register', { wallet_address: WALLET, email: 'asha@example.com' }],
+    ['/api/auth/register', { wallet_address: WALLET, display_name: 'Asha R', email: 'asha@example.com' }],
     ['/api/auth/login', { wallet_address: WALLET, device_fingerprint: FINGERPRINT }],
     ['/api/auth/verify', { wallet_address: WALLET, nonce: NONCE, signature: SIGNATURE }],
     ['/api/auth/otp/verify', { otp_challenge_id: OTP_CHALLENGE_ID, code: '123456' }],
+    ['/api/auth/otp/resend', { otp_challenge_id: OTP_CHALLENGE_ID }],
   ])('accepts a valid body for %s', async (path, body) => {
     const response = await request(createGateway()).post(path).send(body);
 
@@ -241,7 +261,9 @@ describe('request validation', () => {
   it.each([
     ['/api/auth/register', {}],
     ['/api/auth/register', { wallet_address: '0x1234' }],
-    ['/api/auth/register', { wallet_address: WALLET, phone_number: '98765' }],
+    ['/api/auth/register', { wallet_address: WALLET }],
+    ['/api/auth/register', { wallet_address: WALLET, email: 'not-an-address' }],
+    ['/api/auth/register', { wallet_address: WALLET, phone_number: '+919876543210' }],
     ['/api/auth/register', { wallet_address: WALLET, display_name: '   ' }],
     ['/api/auth/register', { wallet_address: 12345 }],
     ['/api/auth/login', { wallet_address: WALLET }],
@@ -252,6 +274,8 @@ describe('request validation', () => {
     ['/api/auth/otp/verify', { otp_challenge_id: 'not-a-uuid', code: '123456' }],
     ['/api/auth/otp/verify', { otp_challenge_id: OTP_CHALLENGE_ID, code: '12345' }],
     ['/api/auth/otp/verify', { otp_challenge_id: OTP_CHALLENGE_ID, code: 123456 }],
+    ['/api/auth/otp/resend', {}],
+    ['/api/auth/otp/resend', { otp_challenge_id: 'not-a-uuid' }],
   ])('rejects an invalid body for %s: %j', async (path, body) => {
     const response = await request(createGateway()).post(path).send(body);
 
@@ -320,7 +344,7 @@ describe('request validation', () => {
 describe('rate limiting', () => {
   it('rejects excess auth requests with the error envelope', async () => {
     const gateway = createGateway({ capacity: 2, refillIntervalMs: 60_000 });
-    const body = { wallet_address: WALLET };
+    const body = { wallet_address: WALLET, email: 'asha@example.com' };
 
     await request(gateway).post('/api/auth/register').send(body);
     await request(gateway).post('/api/auth/register').send(body);
@@ -345,7 +369,7 @@ describe('rate limiting', () => {
 
   it('is not bypassed by a spoofed X-Forwarded-For header', async () => {
     const gateway = createGateway({ capacity: 1, refillIntervalMs: 60_000 });
-    const body = { wallet_address: WALLET };
+    const body = { wallet_address: WALLET, email: 'asha@example.com' };
 
     await request(gateway).post('/api/auth/register').set('X-Forwarded-For', '198.51.100.1').send(body);
     const response = await request(gateway)

@@ -11,13 +11,14 @@ const walletAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/);
 const hex32Bytes = z.string().regex(/^[0-9a-fA-F]{64}$/);
 // 65-byte secp256k1 signature returned by personal_sign.
 const signature = z.string().regex(/^0x[0-9a-fA-F]{130}$/);
-// E.164 phone number, the format Twilio requires.
-const phoneNumber = z.string().regex(/^\+[1-9]\d{1,14}$/);
+// The step-up code is emailed, so an account needs a working address (RFC 5321
+// caps it at 254 characters).
+const email = z.email().max(254);
 
 const registerBody = z.object({
   wallet_address: walletAddress,
   display_name: z.string().trim().min(1).max(MAX_DISPLAY_NAME_LENGTH).optional(),
-  phone_number: phoneNumber.optional(),
+  email,
 });
 
 const loginBody = z.object({
@@ -34,6 +35,10 @@ const verifyBody = z.object({
 const otpVerifyBody = z.object({
   otp_challenge_id: z.uuid(),
   code: z.string().regex(/^\d{6}$/),
+});
+
+const otpResendBody = z.object({
+  otp_challenge_id: z.uuid(),
 });
 
 const parseJsonBody = express.json({ limit: MAX_BODY_SIZE });
@@ -62,3 +67,4 @@ authBodyValidator.post('/register', parseJsonBody, validateBody(registerBody));
 authBodyValidator.post('/login', parseJsonBody, validateBody(loginBody));
 authBodyValidator.post('/verify', parseJsonBody, validateBody(verifyBody));
 authBodyValidator.post('/otp/verify', parseJsonBody, validateBody(otpVerifyBody));
+authBodyValidator.post('/otp/resend', parseJsonBody, validateBody(otpResendBody));

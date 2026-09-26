@@ -4,28 +4,28 @@ export interface UserRecord {
   id: string;
   walletAddress: string;
   displayName: string | null;
-  phoneNumber: string | null;
+  email: string | null;
 }
 
 interface UserRow {
   id: string;
   wallet_address: string;
   display_name: string | null;
-  phone_number: string | null;
+  email: string | null;
 }
 
 // Wallet addresses are compared in lower case so a checksummed and an
 // unchecksummed spelling of the same wallet are one customer.
 export async function insertUser(
   pool: Pool,
-  user: { walletAddress: string; displayName?: string; phoneNumber?: string },
+  user: { walletAddress: string; displayName?: string; email: string },
 ): Promise<UserRecord | null> {
   const result = await pool.query<UserRow>(
-    `INSERT INTO users (wallet_address, display_name, phone_number)
+    `INSERT INTO users (wallet_address, display_name, email)
      VALUES (lower($1), $2, $3)
      ON CONFLICT (wallet_address) DO NOTHING
-     RETURNING id, wallet_address, display_name, phone_number`,
-    [user.walletAddress, user.displayName ?? null, user.phoneNumber ?? null],
+     RETURNING id, wallet_address, display_name, email`,
+    [user.walletAddress, user.displayName ?? null, user.email],
   );
 
   return result.rows.length === 0 ? null : toRecord(result.rows[0]);
@@ -33,12 +33,19 @@ export async function insertUser(
 
 export async function findUserByWallet(pool: Pool, walletAddress: string): Promise<UserRecord | null> {
   const result = await pool.query<UserRow>(
-    `SELECT id, wallet_address, display_name, phone_number
+    `SELECT id, wallet_address, display_name, email
      FROM users WHERE wallet_address = lower($1)`,
     [walletAddress],
   );
 
   return result.rows.length === 0 ? null : toRecord(result.rows[0]);
+}
+
+export async function listWalletAddresses(pool: Pool): Promise<string[]> {
+  const result = await pool.query<{ wallet_address: string }>(
+    'SELECT wallet_address FROM users ORDER BY created_at',
+  );
+  return result.rows.map((row) => row.wallet_address);
 }
 
 export async function markLoggedIn(pool: Pool, userId: string): Promise<void> {
@@ -50,6 +57,6 @@ function toRecord(row: UserRow): UserRecord {
     id: row.id,
     walletAddress: row.wallet_address,
     displayName: row.display_name,
-    phoneNumber: row.phone_number,
+    email: row.email,
   };
 }

@@ -84,6 +84,13 @@ export async function findBatchLeaves(pool: Pool, batchId: number): Promise<stri
   return result.rows.map((row) => row.leaf_hash);
 }
 
+export async function listBatchRoots(pool: Pool): Promise<{ batchId: number; merkleRoot: string }[]> {
+  const result = await pool.query<{ batch_id: string; merkle_root: string }>(
+    'SELECT batch_id, merkle_root FROM audit_batches ORDER BY batch_id',
+  );
+  return result.rows.map((row) => ({ batchId: Number(row.batch_id), merkleRoot: row.merkle_root }));
+}
+
 export async function findBatch(pool: Pool, batchId: number): Promise<AnchoredBatch | null> {
   const result = await pool.query<{
     batch_id: string;

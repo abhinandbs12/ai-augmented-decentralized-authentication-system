@@ -44,3 +44,17 @@ export async function revokeSession(pool: Pool, tokenHash: string): Promise<bool
 
   return result.rowCount === 1;
 }
+
+// Pausing authentication ends every session except the administrators', who
+// must stay signed in to resume it (TRD §11.3, §12.3). Wallets are stored and
+// configured in lower case.
+export async function revokeSessionsExcept(pool: Pool, walletAddresses: string[]): Promise<number> {
+  const result = await pool.query(
+    `UPDATE sessions s SET revoked_at = now()
+     FROM users u
+     WHERE u.id = s.user_id AND s.revoked_at IS NULL AND u.wallet_address <> ALL($1::text[])`,
+    [walletAddresses],
+  );
+
+  return result.rowCount ?? 0;
+}

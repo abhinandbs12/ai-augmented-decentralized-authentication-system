@@ -1,10 +1,10 @@
 /**
  * trustDevice.ts — mark a demo device as one the customer has used before
  *
- * The first login from a new browser always needs an SMS code, because the
- * device and the address are unfamiliar. Without Twilio credentials that code
- * cannot be delivered, so for a local demo this script records the most recent
- * attempt's device and address as an earlier completed login (one day ago).
+ * The first login from a new browser always needs an email code, because the
+ * device and the address are unfamiliar. When that step is not wanted in a
+ * local demo, this script records the most recent attempt's device and address
+ * as an earlier completed login (one day ago).
  * The next sign-in from that browser then scores in the high-trust band.
  *
  * This is demo seeding, like seed.ts. It needs the development overlay and the
