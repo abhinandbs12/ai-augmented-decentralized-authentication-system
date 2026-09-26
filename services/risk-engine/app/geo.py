@@ -9,9 +9,9 @@ Strategy:
   2. If not found, return 'unknown'.
   3. No network calls ever.
 
-'unknown' is treated as a mild risk signal in the caller — it does not
-trigger the unrecognized_region penalty on its own, but combined with
-no past login from that IP it contributes to the region check.
+The region is stored with each login event for analysts. Scoring does not
+read it yet: the unrecognized_region check compares exact IP addresses, and
+region-based scoring is Phase 2.
 
 Owner: Abhinand Baiju Smitha
 Ref: docs/Abhinand_Task_Plan.md — geo.py section

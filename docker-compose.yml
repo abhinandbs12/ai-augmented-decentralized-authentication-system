@@ -2,6 +2,8 @@
 # Phase 1 integration: Gateway, Orchestrator, Risk Engine, MongoDB, PostgreSQL, Hardhat node.
 #
 # Only the gateway and the Hardhat RPC port are published to the host (TRD §13.2, SR-10).
+# The RPC is bound to the loopback address: its development accounts, including the
+# contract admin, are unlocked, so no other machine on the network may reach it.
 # For direct access to the internal services while developing, add docker-compose.dev.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
@@ -10,7 +12,7 @@ services:
   hardhat:
     build: ./contracts
     ports:
-      - "8545:8545"
+      - "127.0.0.1:8545:8545"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:8545',{method:'POST',headers:{'Content-Type':'application/json'},body:'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\"}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s

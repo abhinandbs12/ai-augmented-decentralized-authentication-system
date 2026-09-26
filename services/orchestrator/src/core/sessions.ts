@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Pool } from 'pg';
-import { findActiveSession, insertSession, revokeSession } from '../db/sessions';
+import { findActiveSession, insertSession, revokeSession, revokeSessionsExcept } from '../db/sessions';
 import type { LRUCache } from '../ds/lruCache';
 import type { CachedSession } from './loginStateMachine';
 
@@ -62,5 +62,13 @@ export class SessionStore {
   async revoke(token: string): Promise<boolean> {
     this.cache.delete(token);
     return revokeSession(this.pool, hashSessionToken(token));
+  }
+
+  // Postgres first, then the cache, so a lookup that misses the emptied cache
+  // already finds the session revoked. The kept sessions reload from Postgres.
+  async revokeAllExcept(walletAddresses: string[]): Promise<number> {
+    const revoked = await revokeSessionsExcept(this.pool, walletAddresses);
+    this.cache.clear();
+    return revoked;
   }
 }

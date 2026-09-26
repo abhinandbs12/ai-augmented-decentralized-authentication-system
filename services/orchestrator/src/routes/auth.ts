@@ -13,11 +13,12 @@ import type { SessionStore } from '../core/sessions';
 import { findUserByWallet, insertUser, markLoggedIn } from '../db/users';
 import type { LRUCache } from '../ds/lruCache';
 import { sendError, type ErrorCode } from '../errors';
-import type { OtpService } from '../otp/otpService';
+import type { OtpDelivery, OtpService } from '../otp/otpService';
 import type { Realtime } from '../realtime/socket';
 import {
   asyncRoute,
   clientIp,
+  isEmail,
   isHex32Bytes,
   isOtpCode,
   isSignature,
@@ -57,8 +58,10 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
   router.post(
     '/register',
     asyncRoute(async (req, res) => {
-      const { wallet_address: walletAddress, display_name: displayName, phone_number: phoneNumber } = req.body ?? {};
-      if (!isWalletAddress(walletAddress)) {
+      const { wallet_address: walletAddress, display_name: displayName, email } = req.body ?? {};
+      // The address is required: a sign-in that needs an extra check can only
+      // be finished with the code emailed to it.
+      if (!isWalletAddress(walletAddress) || !isEmail(email)) {
         sendError(res, 'INVALID_REQUEST');
         return;
       }
@@ -84,7 +87,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
       const user = await insertUser(deps.pool, {
         walletAddress,
         displayName: typeof displayName === 'string' ? displayName : undefined,
-        phoneNumber: typeof phoneNumber === 'string' ? phoneNumber : undefined,
+        email: email.trim().toLowerCase(),
       });
 
       if (user === null) {
@@ -109,6 +112,7 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
 
       const ipAddress = clientIp(req);
       const user = await findUserByWallet(deps.pool, walletAddress);
+      let otpDelivery: OtpDelivery = 'none';
 
       const result = await handleLogin(
         {
@@ -127,12 +131,15 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
               factors: score.reasons,
               route: 'allow',
             }),
-          startOtpChallenge: (wallet, score) =>
-            deps.otp.start(wallet, user?.phoneNumber ?? null, {
+          startOtpChallenge: async (wallet, score) => {
+            const started = await deps.otp.start(wallet, user?.email ?? null, {
               trustScore: score.trustScore,
               deviceFingerprint,
               factors: score.reasons,
-            }),
+            });
+            otpDelivery = started.delivery;
+            return started.challengeId;
+          },
         },
       );
 
@@ -173,7 +180,8 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
           trust_score: result.trustScore,
           factors: result.reasons,
           otp_challenge_id: result.otpChallengeId,
-          otp_delivery: deps.otp.deliveryChannel,
+          otp_delivery: otpDelivery,
+          resend_in_seconds: deps.otp.resendCooldownSeconds,
         });
         return;
       }
@@ -255,12 +263,18 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
       const verification = await deps.otp.verify(challengeId, code);
 
       if (verification.status === 'verified') {
-        const nonce = await deps.nonces.issue(verification.walletAddress, {
-          trustScore: verification.trustScore,
-          deviceFingerprint: verification.deviceFingerprint,
-          factors: verification.factors,
-          route: 'otp_required',
-        });
+        // Same id as the code challenge, so /verify completes the event that
+        // /login recorded for this attempt instead of starting a second one.
+        const nonce = await deps.nonces.issue(
+          verification.walletAddress,
+          {
+            trustScore: verification.trustScore,
+            deviceFingerprint: verification.deviceFingerprint,
+            factors: verification.factors,
+            route: 'otp_required',
+          },
+          challengeId,
+        );
         res.json({
           decision: 'allow',
           trust_score: verification.trustScore,
@@ -277,12 +291,46 @@ export function createAuthRoutes(deps: AuthDependencies): Router {
       }
 
       if (verification.status === 'expired') {
-        sendError(res, 'NONCE_EXPIRED');
+        sendError(res, 'OTP_EXPIRED');
         return;
       }
 
       // Destroyed after three failures, already used, or never existed: the
       // attempt is over and the same challenge can never succeed again.
+      sendError(res, 'RISK_BLOCKED');
+    }),
+  );
+
+  // A new code for the same attempt: after a cooldown, and only a few times.
+  router.post(
+    '/otp/resend',
+    asyncRoute(async (req, res) => {
+      const { otp_challenge_id: challengeId } = req.body ?? {};
+      if (!isUuid(challengeId)) {
+        sendError(res, 'INVALID_REQUEST');
+        return;
+      }
+
+      const outcome = await deps.otp.resend(
+        challengeId,
+        async (wallet) => (await findUserByWallet(deps.pool, wallet))?.email ?? null,
+      );
+
+      if (outcome.status === 'sent') {
+        res.json({ otp_delivery: outcome.delivery, resend_in_seconds: deps.otp.resendCooldownSeconds });
+        return;
+      }
+      if (outcome.status === 'too_soon') {
+        res.setHeader('Retry-After', String(outcome.retryAfterSeconds));
+        sendError(res, 'OTP_RESEND_TOO_SOON', { retry_after_seconds: outcome.retryAfterSeconds });
+        return;
+      }
+      if (outcome.status === 'limit_reached') {
+        sendError(res, 'OTP_RESEND_LIMIT');
+        return;
+      }
+
+      // Verified, destroyed or never existed, as on /otp/verify.
       sendError(res, 'RISK_BLOCKED');
     }),
   );
@@ -309,8 +357,10 @@ function bearerToken(header: string | undefined): string | undefined {
   return header?.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : undefined;
 }
 
-// The challenge created for this attempt is its event id, so the event written
-// now and the one written after verification are the same record.
+// The challenge created for this attempt is its event id: the nonce on the
+// allow route, the code challenge on the step-up route (whose nonce reuses that
+// id). The event written now and the one written after verification are
+// therefore the same record.
 function eventIdOf(result: { state: string; nonce?: { challengeId: string }; otpChallengeId?: string }): string {
   return result.nonce?.challengeId ?? result.otpChallengeId ?? randomUUID();
 }

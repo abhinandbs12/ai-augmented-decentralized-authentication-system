@@ -12,6 +12,7 @@ export interface LoginResponse {
   nonce?: string;
   otp_challenge_id?: string;
   otp_delivery?: OtpDelivery;
+  resend_in_seconds?: number;
   request_id?: string;
 }
 
@@ -29,6 +30,7 @@ interface LoginProps {
     trustScore: number;
     factors: string[];
     delivery: OtpDelivery;
+    resendInSeconds: number;
   }) => void;
   onRestart: () => void;
 }
@@ -74,7 +76,8 @@ export default function Login({ walletAddress, onSignedIn, onCodeRequired, onRes
             otpChallengeId: login.otp_challenge_id,
             trustScore: login.trust_score ?? 0,
             factors: login.factors ?? [],
-            delivery: login.otp_delivery ?? 'sms',
+            delivery: login.otp_delivery ?? 'none',
+            resendInSeconds: login.resend_in_seconds ?? 30,
           });
           return;
         }
@@ -138,7 +141,7 @@ export default function Login({ walletAddress, onSignedIn, onCodeRequired, onRes
   );
 }
 
-// Shared by the signature-only path and the path that follows an SMS code.
+// Shared by the signature-only path and the path that follows an email code.
 export async function completeWithSignature(
   walletAddress: string,
   nonce: string,

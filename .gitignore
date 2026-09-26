@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------
 # Secrets — never commit these
 # ---------------------------------------------------------------
-# .env holds the internal API token and any Twilio credentials.
+# .env holds the internal API token and any SMTP credentials.
 # .env.example is the template and IS tracked, so it is excluded below.
 .env
 .env.*

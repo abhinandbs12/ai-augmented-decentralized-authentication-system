@@ -43,7 +43,7 @@ export default function Attempts({ sessionToken }: { sessionToken: string }) {
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-2">
-          The {topN} lowest-scoring recent attempts. A cluster tag means the wallet belongs to a ring the fraud graph flagged.
+          The {topN} lowest-scoring recent attempts. A cluster tag marks a wallet the fraud graph flagged after three blocked attempts in an hour.
         </p>
         <div className="flex items-center gap-2">
           <label htmlFor="top-n" className="text-sm text-ink-3">

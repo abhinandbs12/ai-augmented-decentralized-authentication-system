@@ -89,20 +89,40 @@ describe('loadConfig', () => {
     );
   });
 
-  it('only configures Twilio when all three values are present', () => {
-    const partial = loadConfig({ ...REQUIRED, TWILIO_ACCOUNT_SID: 'AC123', TWILIO_AUTH_TOKEN: 'secret' });
-    const complete = loadConfig({
+  it('sends no email without SMTP_HOST', () => {
+    expect(loadConfig({ ...REQUIRED, SMTP_USER: 'bank@example.com', SMTP_PASS: 'app-password' }).smtp).toBeNull();
+  });
+
+  it('reads a mail server with the submission port and a sender address by default', () => {
+    const catcher = loadConfig({ ...REQUIRED, SMTP_HOST: 'mailpit', SMTP_PORT: '1025' });
+    const provider = loadConfig({
       ...REQUIRED,
-      TWILIO_ACCOUNT_SID: 'AC123',
-      TWILIO_AUTH_TOKEN: 'secret',
-      TWILIO_FROM_NUMBER: '+15005550006',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_USER: 'bank@example.com',
+      SMTP_PASS: 'app-password',
     });
 
-    expect(partial.twilio).toBeNull();
-    expect(complete.twilio).toEqual({
-      accountSid: 'AC123',
-      authToken: 'secret',
-      fromNumber: '+15005550006',
+    expect(catcher.smtp).toEqual({ host: 'mailpit', port: 1025, user: '', pass: '', from: 'no-reply@demo-bank.local' });
+    expect(provider.smtp).toEqual({
+      host: 'smtp.example.com',
+      port: 587,
+      user: 'bank@example.com',
+      pass: 'app-password',
+      from: 'bank@example.com',
     });
+  });
+
+  it('refuses a mail user without a password', () => {
+    expect(() => loadConfig({ ...REQUIRED, SMTP_HOST: 'smtp.example.com', SMTP_USER: 'bank@example.com' })).toThrow(
+      /SMTP_PASS/,
+    );
+  });
+
+  it('allows a new code 30 seconds after the last, three sends in all, unless told otherwise', () => {
+    const defaults = loadConfig({ ...REQUIRED });
+    const tuned = loadConfig({ ...REQUIRED, OTP_RESEND_COOLDOWN_SECONDS: '60', OTP_MAX_SENDS: '5' });
+
+    expect([defaults.otpResendCooldownMs, defaults.otpMaxSends]).toEqual([30_000, 3]);
+    expect([tuned.otpResendCooldownMs, tuned.otpMaxSends]).toEqual([60_000, 5]);
   });
 });

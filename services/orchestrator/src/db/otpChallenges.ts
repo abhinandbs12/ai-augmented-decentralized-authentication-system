@@ -10,6 +10,8 @@ export interface OtpChallenge {
   attempts: number;
   verified: boolean;
   expired: boolean;
+  sentAt: Date;
+  sendCount: number;
 }
 
 export async function insertOtpChallenge(
@@ -51,9 +53,11 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     attempts: number;
     verified: boolean;
     expired: boolean;
+    sent_at: Date;
+    send_count: number;
   }>(
     `SELECT id, wallet_address, code_hash, trust_score, device_fingerprint, factors, attempts, verified,
-            expires_at <= now() AS expired
+            expires_at <= now() AS expired, sent_at, send_count
      FROM otp_challenges WHERE id = $1`,
     [id],
   );
@@ -73,7 +77,27 @@ export async function findOtpChallenge(pool: Pool, id: string): Promise<OtpChall
     attempts: row.attempts,
     verified: row.verified,
     expired: row.expired,
+    sentAt: row.sent_at,
+    sendCount: row.send_count,
   };
+}
+
+// A new code for a challenge that is still open. `sendCount` is the count the
+// caller read: if another request replaced the code in between, the count has
+// moved on, nothing is updated, and only one of them sends an email.
+export async function replaceOtpCode(
+  pool: Pool,
+  id: string,
+  replacement: { codeHash: string; expiresAt: Date; sendCount: number },
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE otp_challenges
+     SET code_hash = $2, expires_at = $3, sent_at = now(), send_count = send_count + 1
+     WHERE id = $1 AND verified = false AND send_count = $4`,
+    [id, replacement.codeHash, replacement.expiresAt, replacement.sendCount],
+  );
+
+  return result.rowCount === 1;
 }
 
 export async function countFailedAttempt(pool: Pool, id: string): Promise<number> {

@@ -76,13 +76,14 @@ async function main() {
   if (hasGraphPenalty) {
     console.log("\n  ✅ PASS — Graph proximity penalty applied, fraud ring detected.");
   } else {
-    console.log("\n  ⚠️  Graph proximity penalty not yet applied.");
-    console.log("     This may require more blocked attempts to auto-flag a bad actor.");
+    console.log("\n  ❌ FAIL — no graph proximity penalty, so the ring was not detected.");
+    console.log("     A mule is flagged after three blocked attempts in an hour; check that seed.ts ran.");
     console.log(`     Current score: ${data.trust_score}, reasons: ${data.reasons}`);
+    process.exitCode = 1;
   }
 }
 
 main().catch((e) => {
   console.error("❌ FAIL:", e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

@@ -5,9 +5,13 @@
  * Ref: PRD §3.3, scenario S2
  */
 
-import { NORMAL_WALLETS, UNKNOWN_DEVICE } from "../demoData";
+import { NORMAL_WALLETS, deviceFingerprint } from "../demoData";
 
 const CUSTOMER = NORMAL_WALLETS[0];
+// A phone only this scenario uses. UNKNOWN_DEVICE is the S3 attacker's device:
+// once S3 has run, the fraud graph links it to a flagged wallet, and S2 would
+// then fail whenever it runs after S3.
+const NEW_PHONE = deviceFingerprint("s2_new_phone");
 
 const RISK_ENGINE_URL = process.env.RISK_ENGINE_URL || "http://localhost:8001";
 
@@ -21,7 +25,7 @@ async function main() {
     body: JSON.stringify({
       wallet: CUSTOMER.wallet,
       ip_address: CUSTOMER.ip,
-      device_fingerprint: UNKNOWN_DEVICE,
+      device_fingerprint: NEW_PHONE,
       timestamp: new Date().toISOString(),
     }),
   });
@@ -34,11 +38,11 @@ async function main() {
     console.log("\n  ✅ PASS — Score in OTP band (50–89), step-up expected.");
   } else {
     console.log(`\n  ❌ FAIL — Expected score 50-89, got ${data.trust_score}.`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
 main().catch((e) => {
   console.error("❌ FAIL:", e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

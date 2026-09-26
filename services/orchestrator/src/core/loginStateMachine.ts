@@ -66,8 +66,8 @@ export async function handleLogin(
     return { state: 'OTP_PENDING', trustScore, reasons, otpChallengeId };
   }
 
-  // No challenge of any kind is created. The risk engine's /score call has already
-  // recorded this attempt, with decision "blocked", in login_events.
+  // No challenge of any kind is created. The /login route still reports the
+  // attempt, with decision "blocked", so it is recorded in login_events.
   return { state: 'BLOCKED', trustScore, reasons };
 }
 

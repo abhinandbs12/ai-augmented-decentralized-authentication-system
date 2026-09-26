@@ -8,6 +8,7 @@ export class ApiError extends Error {
     message: string,
     readonly requestId?: string,
     readonly attemptsRemaining?: number,
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
   }
@@ -40,6 +41,7 @@ async function send<T>(path: string, init: RequestInit, sessionToken?: string | 
       error.message ?? 'Something went wrong. Please try again.',
       error.request_id,
       error.attempts_remaining,
+      error.retry_after_seconds,
     );
   }
   return payload as T;
@@ -58,14 +60,29 @@ export async function deviceFingerprint(): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-interface EthereumProvider {
+export interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 }
 
+// A key created in this browser (FR-01) signs for the current sign-in in place
+// of the wallet extension. null means the extension.
+let browserSigner: EthereumProvider | null = null;
+
+export function setBrowserSigner(signer: EthereumProvider | null): void {
+  browserSigner = signer;
+}
+
+export const usingBrowserSigner = (): boolean => browserSigner !== null;
+
 function wallet(): EthereumProvider {
+  if (browserSigner) {
+    return browserSigner;
+  }
   const provider = (window as unknown as { ethereum?: EthereumProvider }).ethereum;
   if (!provider) {
-    throw new Error('No wallet extension found. Install MetaMask, then reload this page.');
+    throw new Error(
+      'No wallet extension found. Install MetaMask and reload this page, or open an account with a key created in this browser.',
+    );
   }
   return provider;
 }

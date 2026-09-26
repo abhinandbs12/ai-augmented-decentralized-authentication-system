@@ -6,6 +6,7 @@ import {
   findOtpChallenge,
   insertOtpChallenge,
   markOtpVerified,
+  replaceOtpCode,
 } from '../db/otpChallenges';
 
 export type OtpVerification =
@@ -15,29 +16,43 @@ export type OtpVerification =
   | { status: 'expired' }
   | { status: 'unknown' };
 
-// 'sms' is a real provider, 'demo-log' writes the code to the service log for a
-// demonstration, and 'none' means the code reaches nobody. The screen that asks
-// for the code says which one is in use, so nobody is told an SMS was sent when
-// none was.
-export type OtpDeliveryChannel = 'sms' | 'demo-log' | 'none';
+// 'email' sends through an SMTP server; 'none' means no mail server is
+// configured, so a code would reach nobody.
+export type OtpDeliveryChannel = 'email' | 'none';
+
+// What the code screen is told about one send: the email went out, the mail
+// server refused it or did not answer (a new code can be asked for), or there
+// was nowhere to send it (no address on the account, or no mail server). Nobody
+// is told a code was sent when it was not.
+export type OtpDelivery = 'email' | 'failed' | 'none';
+
+export type OtpResend =
+  | { status: 'sent'; delivery: OtpDelivery }
+  | { status: 'too_soon'; retryAfterSeconds: number }
+  | { status: 'limit_reached' }
+  | { status: 'over' };
 
 export interface OtpSender {
   readonly channel: OtpDeliveryChannel;
-  send(phoneNumber: string, code: string): Promise<void>;
+  send(to: string, code: string): Promise<void>;
 }
 
 export interface OtpOptions {
   ttlMs: number;
   maxAttempts: number;
+  resendCooldownMs: number;
+  maxSends: number;
 }
 
 function hashCode(code: string): string {
   return createHash('sha256').update(code).digest('hex');
 }
 
+const newCode = () => randomInt(0, 1_000_000).toString().padStart(6, '0');
+
 // Six digits, five minute TTL, three attempts, then the challenge is destroyed
 // (TRD §5.5). Only the hash of the code is stored: the code itself exists in
-// memory long enough to be sent by SMS and is never logged or returned.
+// memory long enough to be emailed and is never logged or returned.
 export class OtpService {
   constructor(
     private readonly pool: Pool,
@@ -45,16 +60,16 @@ export class OtpService {
     private readonly sender: OtpSender,
   ) {}
 
-  get deliveryChannel(): OtpDeliveryChannel {
-    return this.sender.channel;
+  get resendCooldownSeconds(): number {
+    return Math.ceil(this.options.resendCooldownMs / 1000);
   }
 
   async start(
     walletAddress: string,
-    phoneNumber: string | null,
+    email: string | null,
     attempt: { trustScore: number; deviceFingerprint: string; factors: string[] },
-  ): Promise<string> {
-    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+  ): Promise<{ challengeId: string; delivery: OtpDelivery }> {
+    const code = newCode();
     const challengeId = await insertOtpChallenge(this.pool, {
       walletAddress,
       codeHash: hashCode(code),
@@ -62,17 +77,38 @@ export class OtpService {
       expiresAt: new Date(Date.now() + this.options.ttlMs),
     });
 
-    if (phoneNumber) {
-      // Delivery failures are never fatal to the request and never upgrade the
-      // attempt: without the code the login simply cannot continue.
-      await this.sender.send(phoneNumber, code).catch((error: Error) => {
-        console.error(`OTP delivery failed for challenge ${challengeId}: ${error.message}`);
-      });
-    } else {
-      console.warn(`No phone number on file, OTP challenge ${challengeId} cannot be delivered`);
+    return { challengeId, delivery: await this.deliver(challengeId, email, code) };
+  }
+
+  // A new code for the same challenge, so the sign-in stays one attempt and one
+  // event. The old code stops working. Wrong guesses are not reset: the three
+  // attempts belong to the challenge, whatever the number of codes sent.
+  async resend(challengeId: string, emailOf: (walletAddress: string) => Promise<string | null>): Promise<OtpResend> {
+    const challenge = await findOtpChallenge(this.pool, challengeId);
+    if (challenge === null || challenge.verified) {
+      return { status: 'over' };
+    }
+    if (challenge.sendCount >= this.options.maxSends) {
+      return { status: 'limit_reached' };
     }
 
-    return challengeId;
+    const waitMs = challenge.sentAt.getTime() + this.options.resendCooldownMs - Date.now();
+    if (waitMs > 0) {
+      return { status: 'too_soon', retryAfterSeconds: Math.ceil(waitMs / 1000) };
+    }
+
+    const code = newCode();
+    const replaced = await replaceOtpCode(this.pool, challengeId, {
+      codeHash: hashCode(code),
+      expiresAt: new Date(Date.now() + this.options.ttlMs),
+      sendCount: challenge.sendCount,
+    });
+    if (!replaced) {
+      // A second request for this challenge got there first and sent a code.
+      return { status: 'too_soon', retryAfterSeconds: this.resendCooldownSeconds };
+    }
+
+    return { status: 'sent', delivery: await this.deliver(challengeId, await emailOf(challenge.walletAddress), code) };
   }
 
   async verify(challengeId: string, code: string): Promise<OtpVerification> {
@@ -108,6 +144,25 @@ export class OtpService {
     }
 
     return { status: 'invalid', attemptsRemaining: this.options.maxAttempts - attempts };
+  }
+
+  // Delivery failures are never fatal to the request and never upgrade the
+  // attempt: without the code the login simply cannot continue.
+  private async deliver(challengeId: string, email: string | null, code: string): Promise<OtpDelivery> {
+    if (!email || this.sender.channel === 'none') {
+      console.warn(
+        `OTP challenge ${challengeId} cannot be delivered: ${email ? 'no mail server is configured' : 'no email address on file'}`,
+      );
+      return 'none';
+    }
+
+    try {
+      await this.sender.send(email, code);
+      return 'email';
+    } catch (error) {
+      console.error(`OTP email for challenge ${challengeId} failed: ${(error as Error).message}`);
+      return 'failed';
+    }
   }
 }
 

@@ -141,3 +141,22 @@ describe('LRUCache.delete', () => {
     expect(cache.get('next')).toBe(2);
   });
 });
+
+describe('LRUCache.clear', () => {
+  it('empties the cache and keeps working at the same capacity', () => {
+    const cache = new LRUCache<string, number>(2);
+    cache.put('a', 1);
+    cache.put('b', 2);
+
+    cache.clear();
+
+    expect(cache.get('a')).toBeUndefined();
+    expect(cache.get('b')).toBeUndefined();
+    cache.put('c', 3);
+    cache.put('d', 4);
+    cache.put('e', 5);
+    expect(cache.get('c')).toBeUndefined();
+    expect(cache.get('d')).toBe(4);
+    expect(cache.get('e')).toBe(5);
+  });
+});

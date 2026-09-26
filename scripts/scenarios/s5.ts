@@ -63,7 +63,8 @@ async function main() {
 
   if (!paused) {
     console.log("\n  ❌ FAIL — the circuit breaker did not trip.");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log("\n  ✅ PASS — the breaker tripped and every login is now refused.");
@@ -73,5 +74,5 @@ async function main() {
 
 main().catch((e) => {
   console.error("❌ FAIL:", e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });
