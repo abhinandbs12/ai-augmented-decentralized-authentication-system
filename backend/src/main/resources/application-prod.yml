@@ -1,0 +1,10 @@
+# Deployed behind a trusted TLS-terminating reverse proxy.
+server:
+  # Honor X-Forwarded-* from the proxy: the real client address is rate limited, and requests are
+  # recognised as HTTPS so the Strict-Transport-Security header is sent.
+  forward-headers-strategy: native
+  servlet:
+    session:
+      cookie:
+        # Cookies are always Secure outside localhost, whatever SESSION_COOKIE_SECURE says.
+        secure: true

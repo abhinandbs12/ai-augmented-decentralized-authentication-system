@@ -1,15 +1,7 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
-
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm ci
-
-COPY tsconfig.json hardhat.config.ts ./
-COPY contracts/ ./contracts/
-COPY scripts/ ./scripts/
-COPY test/ ./test/
-
+COPY . .
 RUN npx hardhat compile
-
 EXPOSE 8545
-CMD ["npx", "hardhat", "node", "--hostname", "0.0.0.0"]

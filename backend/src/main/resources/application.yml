@@ -1,0 +1,70 @@
+spring:
+  config:
+    import: "optional:file:../.env.local[.properties],optional:file:.env.local[.properties]"
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 5
+      data-source-properties:
+        # Seconds the driver waits for the server's answer. Without it a connection that stalls
+        # without closing would hold one of the five pool slots for good.
+        socketTimeout: 30
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      # The API has no file uploads. Left enabled, the container would read multipart bodies of
+      # up to 10 MB before the 16 KB request-size limit could apply.
+      enabled: false
+
+server:
+  port: 8080
+  error:
+    include-stacktrace: never
+    include-message: never
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:30m}
+      tracking-modes: cookie
+      cookie:
+        name: BLOCKAUTH_SESSION
+        http-only: true
+        secure: ${SESSION_COOKIE_SECURE:true}
+        same-site: strict
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      # Spring Boot 4 adds liveness/readiness groups by default. Nothing uses them here, and without
+      # them the endpoint answers exactly {"status":"UP"}.
+      probes:
+        enabled: false
+
+blockauth:
+  app-origin: ${APP_ORIGIN}
+  challenge-ttl-seconds: ${CHALLENGE_TTL_SECONDS:120}
+  admin-wallets: ${BLOCKAUTH_ADMIN_WALLETS:}
+  blockchain:
+    rpc-url: ${BLOCKCHAIN_RPC_URL}
+    chain-id: ${BLOCKCHAIN_CHAIN_ID}
+    contract-address: ${CONTRACT_ADDRESS}
+    operator-private-key: ${BLOCKCHAIN_OPERATOR_PRIVATE_KEY}
+  security:
+    second-step-key: ${SECOND_STEP_ENCRYPTION_KEY}
+    trusted-device-days: ${TRUSTED_DEVICE_DAYS:30}
+    admin-action-delay: ${ADMIN_ACTION_DELAY:10m}

@@ -1,0 +1,3387 @@
+{
+  "info": {
+    "name": "BlockAuth API",
+    "description": "Manual and regression checks for the BlockAuth API. Start the local stack, then run the folders in order: \"Get CSRF token\" stores the token that every later POST sends.\n\nPostman cannot produce MetaMask signatures. For the requests marked USER or ADMIN, log in through the browser and copy the value of the BLOCKAUTH_SESSION cookie into the userSession or adminSession variable. Those requests are skipped while the variable is empty. The CSRF token does not need copying.\n\nRun this collection only against your own local or test environment. It deliberately sends failing requests, which are recorded as security events.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "appOrigin",
+      "value": "http://localhost:5173"
+    },
+    {
+      "key": "userSession",
+      "value": ""
+    },
+    {
+      "key": "adminSession",
+      "value": ""
+    },
+    {
+      "key": "adminWallet",
+      "value": ""
+    },
+    {
+      "key": "targetWallet",
+      "value": ""
+    },
+    {
+      "key": "xsrf",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth (unsigned checks)",
+      "description": "What can be checked without a wallet signature. Attacks that need a real signature (replay, a signature from another wallet, expired challenges, revoked wallets) are automated in the backend integration tests, because Postman cannot sign as MetaMask.",
+      "item": [
+        {
+          "name": "Get CSRF token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns the header name and the token', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.headerName).to.eql('X-XSRF-TOKEN');",
+                  "    pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "    pm.collectionVariables.set('xsrf', body.token);",
+                  "});",
+                  "pm.test('security headers are present', () => {",
+                  "    pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.eql('nosniff');",
+                  "    pm.expect(pm.response.headers.get('X-Frame-Options')).to.eql('DENY');",
+                  "    pm.expect(pm.response.headers.get('Referrer-Policy')).to.eql('no-referrer');",
+                  "    pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include(\"default-src 'none'\");",
+                  "    pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store');",
+                  "});",
+                  "pm.test('the server does not advertise itself', () => {",
+                  "    pm.expect(pm.response.headers.has('Server')).to.be.false;",
+                  "    pm.expect(pm.response.headers.has('X-Powered-By')).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf",
+            "description": "Run this first: every POST in the collection sends the token it stores."
+          }
+        },
+        {
+          "name": "Request login challenge",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('challenge text, 32-hex nonce and expiry are returned', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('challenge', 'nonce', 'expiresAt');",
+                  "    pm.expect(body.nonce).to.match(/^[0-9a-f]{32}$/);",
+                  "    pm.expect(body.challenge).to.include(' wants you to sign in with your Ethereum account:\\n');",
+                  "    pm.expect(body.challenge).to.include('\\nSign in to BlockAuth. ').and.include('\\nNonce: ' + body.nonce + '\\n');",
+                  "    pm.expect(new Date(body.expiresAt).getTime()).to.be.above(Date.now());",
+                  "    pm.collectionVariables.set('challengeWallet', pm.variables.get('randomWallet'));",
+                  "    // Stored as a JSON string literal so the line breaks survive in the next request body.",
+                  "    pm.collectionVariables.set('challengeJson', JSON.stringify(body.challenge));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{randomWallet}}\"\n}"
+            },
+            "description": "Issued although the wallet is not registered: the response must not reveal whether a wallet exists."
+          }
+        },
+        {
+          "name": "Verify the issued challenge with a forged signature",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('rejected as an invalid signature', () => pm.expect(pm.response.json().code).to.be.oneOf(['INVALID_SIGNATURE', 'SIGNATURE_MISMATCH']));",
+                  "pm.test('no session is created', () => pm.expect(pm.response.headers.get('Set-Cookie') || '').to.not.include('BLOCKAUTH_SESSION='));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{challengeWallet}}\",\n  \"challenge\": {{challengeJson}},\n  \"signature\": \"0xabababababababababababababababababababababababababababababababab12121212121212121212121212121212121212121212121212121212121212121d\"\n}"
+            },
+            "description": "65 bytes with a recovery value of 29. Counts as one failed authentication."
+          }
+        },
+        {
+          "name": "Request registration challenge",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('the statement says it registers the wallet', () => pm.expect(pm.response.json().challenge).to.include('\\nRegister this wallet with BlockAuth. '));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{randomWallet}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify with a challenge that was never issued",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is INVALID_CHALLENGE', () => pm.expect(pm.response.json().code).to.eql('INVALID_CHALLENGE'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{randomWallet}}\",\n  \"challenge\": \"not a challenge this server issued\",\n  \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n}"
+            },
+            "description": "Counts as one failed authentication. Ten failures within 15 minutes block the client address from the authentication endpoints for 15 minutes; restart the backend to clear the block while testing."
+          }
+        },
+        {
+          "name": "Verify with a 64-byte signature",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});",
+                  "pm.test('the signature field is named', () => pm.expect(pm.response.json().fieldErrors.map(f => f.field)).to.include('signature'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{randomWallet}}\",\n  \"challenge\": \"x\",\n  \"signature\": \"0xabababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout without a session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        },
+        {
+          "name": "Get a new CSRF token after logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a new token is issued', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "    pm.collectionVariables.set('xsrf', body.token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf",
+            "description": "Logout clears the CSRF cookie along with the session, so the following POSTs need a new token."
+          }
+        },
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status is UP and no details are exposed', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.status).to.eql('UP');",
+                  "    pm.expect(body).to.not.have.property('components');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Authorization",
+      "description": "Deny by default. The USER requests need the userSession variable: log in through the browser with a wallet that is not an administrator and copy the value of the BLOCKAUTH_SESSION cookie. Each refused USER request is recorded as a privilege escalation attempt.",
+      "item": [
+        {
+          "name": "Anonymous: own profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/users/me"
+          }
+        },
+        {
+          "name": "Anonymous: admin user list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/users"
+          }
+        },
+        {
+          "name": "Anonymous: on-chain wallet lookup",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/blockchain/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+          }
+        },
+        {
+          "name": "Anonymous: revoke a wallet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed/revoke"
+          }
+        },
+        {
+          "name": "Anonymous: own sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/users/sessions"
+          }
+        },
+        {
+          "name": "Anonymous: fresh-signature challenge",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/step-up",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"ENABLE_SECOND_STEP\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Anonymous: emergency stop",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/emergency-stop"
+          }
+        },
+        {
+          "name": "Anonymous: invalid API key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is INVALID_API_KEY', () => pm.expect(pm.response.json().code).to.eql('INVALID_API_KEY'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "bak.00000000-0000-0000-0000-000000000000.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/users",
+            "description": "Any key that is malformed, unknown, revoked, expired or whose owner is no longer an active administrator gets the same answer."
+          }
+        },
+        {
+          "name": "Anonymous: second step without a pending sign-in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is SECOND_STEP_EXPIRED', () => pm.expect(pm.response.json().code).to.eql('SECOND_STEP_EXPIRED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/second-step",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}"
+            },
+            "description": "Only the browser that signed can finish. Counts as one failed authentication."
+          }
+        },
+        {
+          "name": "Anonymous: actuator environment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/actuator/env"
+          }
+        },
+        {
+          "name": "Anonymous: unmapped path",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is UNAUTHENTICATED', () => pm.expect(pm.response.json().code).to.eql('UNAUTHENTICATED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/does-not-exist"
+          }
+        },
+        {
+          "name": "USER: own profile",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('exactly the profile fields', () => pm.expect(pm.response.json()).to.have.all.keys('id', 'walletAddress', 'role', 'status', 'createdAt'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/me"
+          }
+        },
+        {
+          "name": "USER: own on-chain status",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('read from the blockchain', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('walletAddress', 'registered', 'active', 'status', 'registeredAt', 'source');",
+                  "    pm.expect(body.source).to.eql('BLOCKCHAIN');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/wallet-status"
+          }
+        },
+        {
+          "name": "USER: own history ignores a foreign user id",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a page of the caller\\'s own events', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('items', 'page', 'size', 'totalElements', 'totalPages');",
+                  "    if (body.items.length) pm.expect(body.items[0]).to.have.all.keys('id', 'eventType', 'eventStatus', 'failureReason', 'occurredAt', 'ipAddress');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/authentication-history?userId=00000000-0000-0000-0000-000000000000"
+          }
+        },
+        {
+          "name": "USER: own sessions",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a list with the current session marked', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.be.an('array');",
+                  "    if (body.length) pm.expect(body[0]).to.have.all.keys('id', 'device', 'ipAddress', 'createdAt', 'lastSeenAt', 'secondStep', 'current');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/sessions"
+          }
+        },
+        {
+          "name": "USER: own devices",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a list of devices', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.be.an('array');",
+                  "    if (body.length) pm.expect(body[0]).to.have.all.keys('id', 'label', 'firstSeenAt', 'lastSeenAt', 'trustedUntil', 'current');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/devices"
+          }
+        },
+        {
+          "name": "USER: own sign-in alerts",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a list', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/alerts"
+          }
+        },
+        {
+          "name": "USER: own second step",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('status only, never the secret', () => pm.expect(pm.response.json()).to.have.all.keys('enabled', 'backupCodesLeft'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/second-step"
+          }
+        },
+        {
+          "name": "USER: end a session that is not theirs",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error code is RESOURCE_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('RESOURCE_NOT_FOUND'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/sessions/00000000-0000-0000-0000-000000000000/end",
+            "description": "Another user's session id gets the same answer as one that does not exist."
+          }
+        },
+        {
+          "name": "USER: fresh-signature challenge for their own action",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                  "pm.test('the message names the action', () => pm.expect(pm.response.json().challenge).to.include('Confirm in BlockAuth: Turn on the second step for this wallet.'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/step-up",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"ENABLE_SECOND_STEP\"\n}"
+            }
+          }
+        },
+        {
+          "name": "USER: fresh-signature challenge for an administrator action",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/step-up",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"action\": \"REVOKE_WALLET\",\n  \"walletAddress\": \"0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\"\n}"
+            }
+          }
+        },
+        {
+          "name": "USER: admin user list",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/users"
+          }
+        },
+        {
+          "name": "USER: authentication events",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/authentication-events"
+          }
+        },
+        {
+          "name": "USER: security events",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/security-events"
+          }
+        },
+        {
+          "name": "USER: statistics",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/statistics"
+          }
+        },
+        {
+          "name": "USER: revoke a wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed/revoke"
+          }
+        },
+        {
+          "name": "USER: activate a wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed/activate"
+          }
+        },
+        {
+          "name": "USER: on-chain status of another wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/blockchain/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+          }
+        },
+        {
+          "name": "USER: on-chain verification of another wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/blockchain/verify/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+          }
+        },
+        {
+          "name": "USER: emergency stop state",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/emergency-stop"
+          }
+        },
+        {
+          "name": "USER: waiting administrator actions",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/actions"
+          }
+        },
+        {
+          "name": "USER: API keys",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/api-keys"
+          }
+        },
+        {
+          "name": "USER: flagged wallets",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet-flags"
+          }
+        },
+        {
+          "name": "USER: sign-in trust scores",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('userSession')) {",
+                  "    console.log('Skipped: set the userSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is ACCESS_DENIED', () => pm.expect(pm.response.json().code).to.eql('ACCESS_DENIED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{userSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/login-assessments"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Validation & injection",
+      "item": [
+        {
+          "name": "SQL injection in the wallet address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});",
+                  "pm.test('reported as a field error', () => pm.expect(pm.response.json().fieldErrors[0].field).to.eql('walletAddress'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"' OR '1'='1\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Zero address",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"0x0000000000000000000000000000000000000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Address with a broken checksum",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"0x5AAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Unknown field: there is no password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is MALFORMED_REQUEST', () => pm.expect(pm.response.json().code).to.eql('MALFORMED_REQUEST'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\",\n  \"password\": \"x\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Malformed JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is MALFORMED_REQUEST', () => pm.expect(pm.response.json().code).to.eql('MALFORMED_REQUEST'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"walletAddress\": "
+            }
+          }
+        },
+        {
+          "name": "Wrong content type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 415', () => pm.response.to.have.status(415));",
+                  "pm.test('error code is UNSUPPORTED_MEDIA_TYPE', () => pm.expect(pm.response.json().code).to.eql('UNSUPPORTED_MEDIA_TYPE'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "walletAddress=0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+            }
+          }
+        },
+        {
+          "name": "Body over 16 KB",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set('oversizedValue', 'a'.repeat(20000));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 413', () => pm.response.to.have.status(413));",
+                  "pm.test('error code is PAYLOAD_TOO_LARGE', () => pm.expect(pm.response.json().code).to.eql('PAYLOAD_TOO_LARGE'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{oversizedValue}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Statement terminator in the path",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/blockchain/wallet/0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed;DROP%20TABLE%20users;--"
+          }
+        },
+        {
+          "name": "Script payload in the User-Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 401', () => pm.response.to.have.status(401));",
+                  "pm.test('error code is INVALID_CHALLENGE', () => pm.expect(pm.response.json().code).to.eql('INVALID_CHALLENGE'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});",
+                  "pm.test('the payload is not echoed back', () => pm.expect(pm.response.text()).to.not.include('<script>'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "User-Agent",
+                "value": "<script>alert(1)</script>"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\",\n  \"challenge\": \"x\",\n  \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n}"
+            },
+            "description": "The header is stored with the audit event. Open Security Monitoring as an administrator and confirm it is shown as text and nothing runs. Counts as one failed authentication."
+          }
+        },
+        {
+          "name": "ADMIN: injection in an enum filter",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/authentication-events?eventType=LOGIN'%20--"
+          }
+        },
+        {
+          "name": "ADMIN: page size over the limit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/users?size=101"
+          }
+        },
+        {
+          "name": "ADMIN: date range the wrong way round",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/security-events?from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z"
+          }
+        }
+      ]
+    },
+    {
+      "name": "CSRF",
+      "description": "State-changing requests need the X-XSRF-TOKEN header and, when a browser sends one, an Origin header naming the application. Each refusal is recorded as a security event.",
+      "item": [
+        {
+          "name": "Logout without a token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        },
+        {
+          "name": "Logout with a wrong token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "not-the-token"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        },
+        {
+          "name": "Logout with the token as a URL parameter",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/logout?_csrf={{xsrf}}"
+          }
+        },
+        {
+          "name": "Verify without a token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\",\n  \"challenge\": \"x\",\n  \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Revoke without a token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/wallet/0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed/revoke"
+          }
+        },
+        {
+          "name": "Logout from a foreign origin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', () => pm.response.to.have.status(403));",
+                  "pm.test('error code is CSRF_INVALID', () => pm.expect(pm.response.json().code).to.eql('CSRF_INVALID'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Origin",
+                "value": "http://evil.test"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          }
+        },
+        {
+          "name": "Logout from the application's origin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Origin",
+                "value": "{{appOrigin}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout",
+            "description": "Set appOrigin to the backend's APP_ORIGIN value if it is not http://localhost:5173."
+          }
+        },
+        {
+          "name": "Get a new CSRF token after logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a new token is issued', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.token).to.be.a('string').and.not.empty;",
+                  "    pm.collectionVariables.set('xsrf', body.token);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf",
+            "description": "Logout clears the CSRF cookie along with the session, so the following POSTs need a new token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rate limiting",
+      "item": [
+        {
+          "name": "Challenge requests until the limit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);",
+                  "// A different wallet and a spoofed forwarding header on every request: neither buys a fresh allowance.",
+                  "pm.variables.set('spoofedAddress', '203.0.113.' + Math.floor(Math.random() * 250));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const sent = Number(pm.collectionVariables.get('floodCount') || 0) + 1;",
+                  "if (pm.response.code !== 429 && sent < 11) {",
+                  "    pm.collectionVariables.set('floodCount', sent);",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "    pm.collectionVariables.unset('floodCount');",
+                  "    pm.test('limited within 11 requests in one minute', () => pm.response.to.have.status(429));",
+                  "    pm.test('error code is RATE_LIMITED', () => pm.expect(pm.response.json().code).to.eql('RATE_LIMITED'));",
+                  "    pm.test('Retry-After says how long to wait', () => pm.expect(Number(pm.response.headers.get('Retry-After'))).to.be.within(1, 60));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "X-Forwarded-For",
+                "value": "{{spoofedAddress}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/challenge",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"walletAddress\": \"{{randomWallet}}\"\n}"
+            },
+            "description": "Repeats itself in the collection runner. The limit is 10 challenge requests per minute per client address and the earlier folders already used part of it, so wait a minute before running the collection again."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Needs the adminSession variable: log in through the browser with a wallet listed in BLOCKAUTH_ADMIN_WALLETS and copy the value of the BLOCKAUTH_SESSION cookie. Set adminWallet to that wallet's address. Changes that need a fresh wallet signature (revoke, reactivate, emergency stop, flags, API keys) cannot be signed from Postman, so the collection checks that they are refused without one; the two targetWallet requests run only when targetWallet names a registered, non-administrator wallet.",
+      "item": [
+        {
+          "name": "List users",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a page of users', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('items', 'page', 'size', 'totalElements', 'totalPages');",
+                  "    pm.expect(body.items.length).to.be.at.most(5);",
+                  "    if (body.items.length) pm.expect(body.items[0]).to.have.all.keys('id', 'walletAddress', 'role', 'status', 'createdAt', 'updatedAt');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/users?size=5"
+          }
+        },
+        {
+          "name": "List users filtered by status and role",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('only active administrators', () => pm.response.json().items.forEach(u => {",
+                  "    pm.expect(u.status).to.eql('ACTIVE');",
+                  "    pm.expect(u.role).to.eql('ADMIN');",
+                  "}));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/users?status=ACTIVE&role=ADMIN"
+          }
+        },
+        {
+          "name": "Authentication events",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('event fields', () => {",
+                  "    const items = pm.response.json().items;",
+                  "    if (items.length) pm.expect(items[0]).to.have.all.keys('id', 'userId', 'actorUserId', 'walletAddress', 'eventType', 'eventStatus', 'failureReason', 'occurredAt', 'ipAddress', 'userAgent');",
+                  "    items.forEach(e => pm.expect(e.eventType).to.eql('LOGIN'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/authentication-events?eventType=LOGIN&size=5"
+          }
+        },
+        {
+          "name": "Security events",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('event fields', () => {",
+                  "    const items = pm.response.json().items;",
+                  "    if (items.length) pm.expect(items[0]).to.have.all.keys('id', 'userId', 'walletAddress', 'attackType', 'description', 'result', 'occurredAt', 'ipAddress');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/security-events?size=5"
+          }
+        },
+        {
+          "name": "Statistics",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('all counters are present', () => pm.expect(pm.response.json()).to.have.all.keys('totalUsers', 'activeWallets', 'revokedWallets', 'authenticationAttempts', 'successfulAttempts', 'failedAttempts', 'blockedAttempts', 'invalidSignatureAttempts', 'replayAttempts', 'revokedWalletAttempts', 'securityEventsTotal', 'securityEventsByType'));",
+                  "pm.test('the counts add up', () => {",
+                  "    const s = pm.response.json();",
+                  "    pm.expect(s.activeWallets + s.revokedWallets).to.eql(s.totalUsers);",
+                  "    pm.expect(s.successfulAttempts + s.failedAttempts + s.blockedAttempts).to.eql(s.authenticationAttempts);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/statistics"
+          }
+        },
+        {
+          "name": "On-chain status of an unregistered wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('read from the blockchain', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.source).to.eql('BLOCKCHAIN');",
+                  "    pm.expect(body.status).to.eql('NOT_REGISTERED');",
+                  "    pm.expect(body.registered).to.be.false;",
+                  "    pm.expect(body.registeredAt).to.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/blockchain/wallet/{{randomWallet}}"
+          }
+        },
+        {
+          "name": "Verify an unregistered wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('not valid', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('walletAddress', 'valid', 'reason');",
+                  "    pm.expect(body.valid).to.be.false;",
+                  "    pm.expect(body.reason).to.eql('NOT_REGISTERED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/blockchain/verify/{{randomWallet}}"
+          }
+        },
+        {
+          "name": "Revoke without a confirmation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is MALFORMED_REQUEST', () => pm.expect(pm.response.json().code).to.eql('MALFORMED_REQUEST'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/{{randomWallet}}/revoke",
+            "description": "Dangerous actions carry a fresh wallet signature in the body; without one nothing is done."
+          }
+        },
+        {
+          "name": "Revoke a wallet that is not registered",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "// A random lowercase address: valid syntax, almost certainly not registered.",
+                  "const hex = Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join('');",
+                  "pm.variables.set('randomWallet', '0x' + hex);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error code is WALLET_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('WALLET_NOT_FOUND'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/{{randomWallet}}/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Revoke own wallet",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.variables.get('adminWallet')) {",
+                  "    console.log('Skipped: set adminWallet to the address you logged in with.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', () => pm.response.to.have.status(409));",
+                  "pm.test('error code is CANNOT_MODIFY_OWN_WALLET', () => pm.expect(pm.response.json().code).to.eql('CANNOT_MODIFY_OWN_WALLET'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/{{adminWallet}}/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Revoke the target wallet with an unsigned confirmation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.variables.get('targetWallet')) {",
+                  "    console.log('Skipped: set targetWallet to change a wallet on the blockchain.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused: the confirmation is not signed by the session wallet (or it is already revoked)', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([403, 409]);",
+                  "    if (pm.response.code === 403) pm.expect(pm.response.json().code).to.eql('STEP_UP_FAILED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/{{targetWallet}}/revoke",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  }\n}"
+            },
+            "description": "Revoking and reactivating need a signature from the administrator's wallet over a one-time message, which only MetaMask can produce: do them from the Wallets page. Counts as one failed authentication."
+          }
+        },
+        {
+          "name": "Reactivate the target wallet with an unsigned confirmation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}",
+                  "if (!pm.variables.get('targetWallet')) {",
+                  "    console.log('Skipped: set targetWallet to change a wallet on the blockchain.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused: the confirmation is not signed (or the wallet is already active)', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([403, 409]);",
+                  "    if (pm.response.code === 403) pm.expect(pm.response.json().code).to.eql('STEP_UP_FAILED');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet/{{targetWallet}}/activate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Emergency stop state",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('state fields', () => pm.expect(pm.response.json()).to.have.all.keys('active', 'blockLogins', 'reason', 'changedBy', 'changedAt'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/emergency-stop"
+          }
+        },
+        {
+          "name": "Switch on the emergency stop with an unsigned confirmation",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('refused, and the stop is unchanged', () => {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([403, 409]);",
+                  "    pm.expect(pm.response.json().code).to.be.oneOf(['STEP_UP_FAILED', 'EMERGENCY_STOP_ALREADY_ACTIVE']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/emergency-stop/activate",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  },\n  \"reason\": \"Checking the confirmation\",\n  \"blockLogins\": false,\n  \"endUserSessions\": false\n}"
+            },
+            "description": "Counts as one failed authentication."
+          }
+        },
+        {
+          "name": "Waiting actions",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a page of actions', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('items', 'page', 'size', 'totalElements', 'totalPages');",
+                  "    if (body.items.length) pm.expect(body.items[0]).to.have.all.keys('id', 'action', 'targetWallet', 'requestedBy', 'requestedAt', 'executeAfter', 'status', 'decidedAt', 'failureReason');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/actions?status=PENDING"
+          }
+        },
+        {
+          "name": "Cancel an action that does not exist",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', () => pm.response.to.have.status(404));",
+                  "pm.test('error code is RESOURCE_NOT_FOUND', () => pm.expect(pm.response.json().code).to.eql('RESOURCE_NOT_FOUND'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/actions/999999999/cancel"
+          }
+        },
+        {
+          "name": "Flagged wallets",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a page', () => pm.expect(pm.response.json()).to.have.all.keys('items', 'page', 'size', 'totalElements', 'totalPages'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/wallet-flags"
+          }
+        },
+        {
+          "name": "Sign-in trust scores",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('assessment fields', () => {",
+                  "    const items = pm.response.json().items;",
+                  "    if (items.length) pm.expect(items[0]).to.have.all.keys('id', 'walletAddress', 'ipAddress', 'score', 'rules', 'decision', 'assessedAt');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/login-assessments?size=5"
+          }
+        },
+        {
+          "name": "API keys",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('a page, with no secrets in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('items', 'page', 'size', 'totalElements', 'totalPages');",
+                  "    pm.expect(pm.response.text()).to.not.include('bak.');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/api-keys"
+          }
+        },
+        {
+          "name": "Create an API key with a scope that does not exist",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('adminSession')) {",
+                  "    console.log('Skipped: set the adminSession variable first.');",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                  "pm.test('error code is VALIDATION_FAILED', () => pm.expect(pm.response.json().code).to.eql('VALIDATION_FAILED'));",
+                  "pm.test('standard error body with nothing internal in it', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.all.keys('status', 'code', 'message', 'timestamp', 'path', 'errorId', 'fieldErrors');",
+                  "    pm.expect(pm.response.text()).to.not.match(/Exception|jdbc:|select |insert |at com\\./i);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              },
+              {
+                "key": "Cookie",
+                "value": "BLOCKAUTH_SESSION={{adminSession}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/admin/api-keys",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"proof\": {\n    \"challenge\": \"not a challenge this server issued\",\n    \"signature\": \"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\"\n  },\n  \"name\": \"Report\",\n  \"scopes\": [\n    \"users:write\"\n  ],\n  \"days\": 30\n}"
+            },
+            "description": "Keys are read-only: only users:read, audit:read and wallet-status:read exist."
+          }
+        }
+      ]
+    }
+  ]
+}

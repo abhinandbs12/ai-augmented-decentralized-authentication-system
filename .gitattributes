@@ -1,0 +1,7 @@
+* text=auto
+
+# The Maven wrapper script must keep LF endings to run inside Linux containers when the
+# repository was checked out on Windows; the Windows launcher needs CRLF.
+mvnw text eol=lf
+*.sh text eol=lf
+*.cmd text eol=crlf

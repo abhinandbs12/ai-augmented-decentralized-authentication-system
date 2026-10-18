@@ -1,20 +1,17 @@
 {
-  "name": "contracts",
+  "name": "blockauth-contracts",
   "version": "1.0.0",
   "private": true,
+  "description": "BlockAuth WalletRegistry smart contract",
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
-    "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
-    "node": "hardhat node"
+    "node": "hardhat node",
+    "deploy": "hardhat run scripts/deploy.js --network localhost"
   },
+  "license": "MIT",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.5",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
-  },
-  "dependencies": {
-    "@openzeppelin/contracts": "^5.0.2"
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "hardhat": "^2.29.1"
   }
 }

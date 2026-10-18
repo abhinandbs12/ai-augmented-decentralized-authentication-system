@@ -1,87 +1,49 @@
-# ---------------------------------------------------------------
-# Secrets — never commit these
-# ---------------------------------------------------------------
-# .env holds the internal API token and any SMTP credentials.
-# .env.example is the template and IS tracked, so it is excluded below.
+# Secrets and local configuration
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
 
-# ---------------------------------------------------------------
-# Planning documents kept local to the team, not published
-# ---------------------------------------------------------------
-docs/
-.planning/
-PRD.md
-TRD.md
-Phase2_Remaining_Work.md
-*_Task_Plan.md
-*_Getting_Started.md
-*_Branching_Strategy.md
-*_Agent_Guide.md
-
-# ---------------------------------------------------------------
-# Dependencies (restored with npm install / pip install)
-# ---------------------------------------------------------------
+# Dependencies
 node_modules/
-.npm
-.yarn-integrity
-venv/
-.venv/
-env/
-*.egg-info/
-.eggs/
-*.egg
 
-# ---------------------------------------------------------------
-# Build output and generated code
-# ---------------------------------------------------------------
-dist/
+# Build output
+target/
 build/
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+dist/
+coverage/
 
-# Hardhat regenerates these from contracts/contracts on every compile.
+# Hardhat: compiled artifacts and per-machine deployment records
 contracts/artifacts/
 contracts/cache/
-contracts/typechain-types/
+contracts/deployments/
 
-# Flutter (apps/mobile is a Phase 2 placeholder)
-apps/mobile/.dart_tool/
-apps/mobile/.flutter-plugins
-apps/mobile/.flutter-plugins-dependencies
-apps/mobile/.packages
-apps/mobile/build/
-apps/mobile/.pub-cache/
-apps/mobile/pubspec.lock
+# Maven wrapper download
+.mvn/wrapper/maven-wrapper.jar
 
-# ---------------------------------------------------------------
-# Test and coverage output
-# ---------------------------------------------------------------
-coverage/
-htmlcov/
-.coverage
-.pytest_cache/
+# Test and scan output
+security-tests/zap/reports/
+newman/
 
-# ---------------------------------------------------------------
-# Logs
-# ---------------------------------------------------------------
+# Private local notes
+*.local.md
+
+# Logs and temporary files
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# ---------------------------------------------------------------
-# Editor and operating-system files
-# ---------------------------------------------------------------
-.vscode/
-.idea/
+*.tmp
 *.swp
-*.swo
-*~
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
 .DS_Store
 Thumbs.db
-ehthumbs.db
-Desktop.ini
+desktop.ini

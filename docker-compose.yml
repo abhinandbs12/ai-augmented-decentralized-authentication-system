@@ -1,110 +1,43 @@
-# Docker Compose — AI-Augmented Decentralized Auth System
-# Phase 1 integration: Gateway, Orchestrator, Risk Engine, MongoDB, PostgreSQL, Hardhat node.
-#
-# Only the gateway and the Hardhat RPC port are published to the host (TRD §13.2, SR-10).
-# The RPC is bound to the loopback address: its development accounts, including the
-# contract admin, are unlocked, so no other machine on the network may reach it.
-# For direct access to the internal services while developing, add docker-compose.dev.yml:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Optional local stack (the primary workflow runs without Docker). The database stays on Neon.
+name: blockauth
 
 services:
-  # --- Blockchain (Karthik) ---
   hardhat:
     build: ./contracts
+    command: ["npx", "hardhat", "node", "--hostname", "0.0.0.0"]
+    # Published on this machine only. The node's accounts are public test keys, and account #0 is the
+    # contract admin: anyone who can reach port 8545 can change the registry.
     ports:
       - "127.0.0.1:8545:8545"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:8545',{method:'POST',headers:{'Content-Type':'application/json'},body:'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_blockNumber\"}'}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD-SHELL", "wget -qO- --header='Content-Type: application/json' --post-data='{\"jsonrpc\":\"2.0\",\"method\":\"eth_chainId\",\"params\":[],\"id\":1}' http://127.0.0.1:8545 || exit 1"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 20
 
-  # Deploys AuthRegistry once the chain is up and writes the address to the
-  # shared volume, so no address has to be copied by hand (TRD 10.3).
-  contract-deploy:
-    build: ./contracts
-    command: ["npx", "hardhat", "run", "scripts/deploy.ts", "--network", "localhost"]
+  backend:
+    build: ./backend
+    env_file: .env.local
     environment:
-      RPC_URL: http://hardhat:8545
-      CONTRACT_ADDRESS_FILE: /shared/contract-address.txt
-    volumes:
-      - chain-state:/shared
-    restart: "no"
+      BLOCKCHAIN_RPC_URL: http://hardhat:8545
+      APP_ORIGIN: http://localhost:3000
+      SESSION_COOKIE_SECURE: "false"
+    ports:
+      - "127.0.0.1:8080:8080"
     depends_on:
       hardhat:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 40s
 
-  # --- Backend Services ---
-  gateway:
-    build: ./services/gateway
+  frontend:
+    build: ./frontend
     ports:
-      - "3000:3000"
-    env_file: .env
-    environment:
-      ORCHESTRATOR_URL: http://orchestrator:3001
+      - "127.0.0.1:3000:80"
     depends_on:
-      orchestrator:
+      backend:
         condition: service_healthy
-
-  orchestrator:
-    build: ./services/orchestrator
-    env_file: .env
-    environment:
-      RISK_ENGINE_URL: http://risk-engine:8001
-      DATABASE_URL: postgres://${POSTGRES_USER:-authuser}:${POSTGRES_PASSWORD:-authpass}@postgres:5432/${POSTGRES_DB:-authdb}
-      MONGO_URL: mongodb://mongo:27017
-      RPC_URL: http://hardhat:8545
-      CONTRACT_ADDRESS_FILE: /shared/contract-address.txt
-    volumes:
-      - chain-state:/shared:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-      mongo:
-        condition: service_started
-      risk-engine:
-        condition: service_healthy
-      contract-deploy:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  risk-engine:
-    build: ./services/risk-engine
-    env_file: .env
-    environment:
-      MONGO_URL: mongodb://mongo:27017
-      VELOCITY_THRESHOLD: "5"
-      VELOCITY_WINDOW_SECONDS: "300"
-    depends_on:
-      mongo:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  # --- Data Stores ---
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      # Local demo defaults. Set these in .env to use anything else; no
-      # credential is fixed in a committed file.
-      POSTGRES_USER: ${POSTGRES_USER:-authuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authpass}
-      POSTGRES_DB: ${POSTGRES_DB:-authdb}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-authuser} -d $${POSTGRES_DB:-authdb}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  mongo:
-    image: mongo:7
-
-volumes:
-  chain-state:

@@ -1,922 +1,297 @@
-<div align="center">
+# BlockAuth
 
-# AI-Augmented Decentralized Authentication System
-### *for Fraud-Resistant Identity Verification*
+Blockchain-based wallet authentication and identity verification.
 
-**An AI-Enhanced, Fraud-Resistant Decentralized Authentication Ecosystem**
+There are no passwords. A user proves control of an Ethereum wallet by signing a one-time message in
+MetaMask. The backend verifies the signature, checks the wallet in the `WalletRegistry` smart contract,
+and opens a server-side session. An administrator can revoke a wallet on the blockchain, which ends its
+sessions and blocks further logins until it is reactivated.
 
-[![Status](https://img.shields.io/badge/status-academic%20project-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
-[![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.25-363636?logo=solidity)]()
-[![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=node.js&logoColor=white)]()
-[![Python](https://img.shields.io/badge/Python-FastAPI-3776AB?logo=python&logoColor=white)]()
-[![React](https://img.shields.io/badge/React-Vite-61DAFB?logo=react&logoColor=black)]()
-[![Flutter](https://img.shields.io/badge/Flutter-Phase%202-02569B?logo=flutter&logoColor=white)]()
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)]()
+| Part | Technology | Folder |
+|---|---|---|
+| Web app | React, JavaScript, CSS (Vite), MetaMask | `frontend/` |
+| API | Java 21, Spring Boot, Spring Security, Web3j, Maven | `backend/` |
+| Smart contract | Solidity, Hardhat (local chain, chain ID 31337) | `contracts/` |
+| Database | Neon PostgreSQL, Flyway migrations | hosted |
 
-**Final Year Project -- Department of Computer Science & Engineering**
+How a login works:
 
-</div>
+1. The web app asks the API for a challenge for the connected wallet address.
+2. The user signs the challenge text in MetaMask (`personal_sign`). No transaction is sent and no gas is paid.
+3. The API checks that the challenge is its own, unexpired and unused, recovers the signer from the
+   signature, and compares it with the claimed address.
+4. The API reads the wallet's status from the smart contract. The blockchain is the authority; the
+   database only mirrors it.
+5. On success the API creates a session and sets an HttpOnly cookie. The browser never stores a token.
 
-> **Status (Phase 1):** wallet sign-in (MetaMask, or a key pair created in the
-> browser) with on-chain signature verification,
-> rule-based Trust Scoring with graph proximity, the email-code step, the circuit
-> breaker and the Merkle audit trail run today; see
-> [PHASE1_COMPLETION_REPORT.md](PHASE1_COMPLETION_REPORT.md) and
-> [REVIEWER_DEMO_GUIDE.md](REVIEWER_DEMO_GUIDE.md). Items marked *(Phase 2)* below
-> are designed but not built yet.
+The system never sees or stores a private key, seed phrase or wallet password.
 
----
+On top of that, BlockAuth limits what someone who obtains a wallet or a session can do; see
+[Account security](#account-security).
 
-## Table of Contents
+## Prerequisites
 
-- [Overview](#overview)
-- [Why This Project Matters](#why-this-project-matters)
-- [The Problem](#the-problem)
-- [Key Features](#key-features)
-- [System Architecture](#system-architecture)
-- [Tech Stack](#tech-stack)
-- [Login Flow](#login-flow)
-- [AI Risk Engine](#ai-risk-engine)
-- [Data Structures and Algorithms](#data-structures-and-algorithms)
-- [Smart Contract](#smart-contract)
-- [API Reference](#api-reference)
-- [Data Model](#data-model)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Testing](#testing)
-- [Security Considerations](#security-considerations)
-- [Success Metrics and KPIs](#success-metrics-and-kpis)
-- [Roadmap and Future Enhancements](#roadmap-and-future-enhancements)
-- [Competitive Analysis](#competitive-and-alternative-approaches)
-- [Team](#team)
-- [References](#references)
-- [License](#license)
+| Tool | Version | Check |
+|---|---|---|
+| Git | any recent | `git --version` |
+| JDK | 21 | `java -version` |
+| Node.js and npm | 22 LTS | `node -v`, `npm -v` |
+| MetaMask | latest, in desktop Chrome | browser toolbar |
+| Neon account | free tier is enough | console.neon.tech |
+| Docker Desktop | optional | `docker --version` |
 
----
+Maven is not installed separately: use the wrapper in `backend/` (`mvnw.cmd` on Windows, `./mvnw` elsewhere).
 
-## Overview
+## Quick start
 
-Password-based authentication remains one of the most exploited attack surfaces on the web. Centralized credential stores are a single point of failure, every login receives identical scrutiny regardless of actual risk, and conventional audit logs can be silently altered after the fact.
+Commands are shown for PowerShell on Windows; the macOS/Linux form follows `#` where it differs.
 
-This project replaces passwords entirely with **blockchain-anchored cryptographic identity**. Users authenticate by signing a one-time challenge with a private key that never leaves their device; a smart contract verifies that signature on-chain. Layered on top is an **AI Risk Engine** that scores every login attempt in real time and decides how much friction is warranted — none, an emailed one-time passcode, or an outright block — plus a **graph-based fraud detection module** that traces relationships between wallets, IPs, and devices to catch coordinated fraud rings, not just individual bad actors.
+1. **Clone and create the local configuration**
 
-Classic data structures and algorithms — a **Merkle tree** for tamper-evident audit batching, an **LRU cache** for O(1) session validation, a **token bucket** for rate limiting, and a **min-heap** for risk-ranked triage *(Phase 2; Phase 1 uses a sorted query)* — keep the system efficient enough for real deployment rather than remaining a toy demo.
+   ```powershell
+   git clone <repository-url> blockauth
+   cd blockauth
+   Copy-Item .env.example .env.local    # cp .env.example .env.local
+   ```
 
-> **The result:** more secure than passwords (nothing secret is ever transmitted or stored server-side), more adaptive than static authentication (friction scales with measured risk), and more auditable than conventional logging (a blockchain-anchored Merkle root makes tampering with historical records cryptographically detectable).
+2. **Database.** In the Neon console create a project for this application and add a second branch,
+   `test`, for the integration tests. For each of the two branches open *Connection details*, choose
+   the direct (non-pooled) host, and fill `DB_*` (the application's branch) and `TEST_DB_*` (`test`)
+   in `.env.local`:
 
----
+   ```text
+   DB_URL=jdbc:postgresql://<host>/<database>?sslmode=require
+   DB_USERNAME=<role>
+   DB_PASSWORD=<password>
+   ```
 
-## Why This Project Matters
+   The tables are created by Flyway when the backend starts.
 
-- Aligns with the **Zero Trust** security model adopted across the industry
-- Sits inside the **passwordless authentication** trend led by Google, Apple, and Microsoft (passkeys)
-- Applies core CS theory — graphs, trees, hashing, caching, rate limiting — to a real engineering problem, not as an academic exercise in isolation
-- Spans the full stack: frontend, backend, blockchain, applied AI, DevOps, and workflow automation
+3. **Contracts: install, compile, test**
 
----
+   ```powershell
+   cd contracts
+   npm install
+   npx hardhat compile
+   npx hardhat test
+   ```
 
-## The Problem
+4. **Start the local blockchain** (terminal A, keep it running)
 
-| # | Problem | Consequence |
-|---|---------|--------------|
-| **P1** | Centralized credential storage | A single breach exposes all user accounts; the database is the highest-value attack target |
-| **P2** | Uniform verification friction | Low-risk and high-risk logins are treated identically, hurting either security or usability |
-| **P3** | Non-verifiable audit history | Login records in a conventional DB can be silently altered or deleted by an admin/attacker |
-| **P4** | No behavioral context | Systems check "is the password correct," not "does this login look like the real user" |
-| **P5** | Poor fraud-ring detection | Coordinated attacks using many linked accounts/devices typically go unnoticed |
+   ```powershell
+   npx hardhat node
+   ```
 
-**Formal problem statement:** *Design and implement a decentralized authentication system that eliminates centralized password storage, verifies user identity through blockchain-anchored cryptographic signatures, adaptively adjusts verification friction using real-time AI-driven risk scoring, and maintains a tamper-evident audit trail of all authentication activity — while remaining efficient enough for practical deployment.*
+   Copy the private key of **Account #0** from the output into `BLOCKCHAIN_OPERATOR_PRIVATE_KEY`.
 
----
+5. **Deploy the contract** (terminal B, in `contracts/`)
 
-## Key Features
+   ```powershell
+   npx hardhat run scripts/deploy.js --network localhost
+   ```
 
-- **Passwordless, wallet-based identity** — register and log in via a public/private key pair: MetaMask, or a key pair created in the browser and stored there encrypted with a passphrase (WalletConnect and WebAuthn/passkeys are Phase 2)
-- **Real-time AI Trust Scoring (0-100)** — every login is scored and routed: allow / OTP step-up / block
-- **Graph-based fraud ring detection** — bounded BFS across a wallet/IP/device adjacency graph flags coordinated attacks
-- **Blockchain-anchored audit trail** — Merkle-batched login events with on-chain roots and per-event proofs
-- **Circuit breaker** — an emergency `pauseAuth()` halts all authentication system-wide during a detected mass attack
-- **Live 3D threat graph** *(Phase 2)* — React + Three.js force-directed visualization of login activity and flagged clusters
-- **Mobile biometric approval** *(Phase 2; `apps/mobile` is a placeholder)* — Flutter companion app for FaceID/fingerprint login approval
-- **Email step-up verification** — a 6-digit code emailed over SMTP (any provider; a local Mailpit inbox in the demo), with a 30-second cooldown before a new code; the n8n workflows and admin alerting are Phase 2
-- **One-command local deployment** — full stack via Docker Compose
+   Copy the printed address into `CONTRACT_ADDRESS`.
 
----
+6. **Choose the administrator wallet.** Copy the address of the MetaMask account you will use as
+   administrator into `BLOCKAUTH_ADMIN_WALLETS`. Any account works; it needs no ETH and no network
+   switch. Use a different MetaMask account to test as a normal user.
 
-## System Architecture
+7. **Start the backend** (terminal C)
 
-The system follows a **layered, service-oriented architecture**. A client layer (web + mobile) talks to a backend orchestrator over HTTPS/WebSocket, which coordinates three peer services — the AI risk engine, the blockchain client, and the automation layer — while structured and unstructured data are split across two purpose-fit databases.
+   ```powershell
+   cd backend
+   .\mvnw.cmd spring-boot:run           # ./mvnw spring-boot:run
+   ```
 
-| Layer | Responsibility |
-|-------|-----------------|
-| **Client Layer** | React web app (wallet sign-in, operations console); Flutter mobile app *(Phase 2)* |
-| **API Gateway** | Express.js gateway — token-bucket rate limiting and request validation |
-| **Backend Orchestrator** | Node.js service coordinating cache, AI calls, blockchain calls, and event queueing |
-| **AI Risk Engine** | Python/FastAPI service computing Trust Score and running graph-based fraud analysis |
-| **Blockchain Layer** | Solidity smart contract — registration, signature verification, Merkle anchoring, pause |
-| **Automation Layer** | Email over SMTP for the code step, sent by the orchestrator; n8n workflows and admin alerts *(Phase 2)* |
-| **Data Layer** | PostgreSQL 16 (structured profiles; plain SQL that also runs on Supabase) + MongoDB (unstructured behavioral telemetry) |
-| **Visualization Layer** | React admin dashboard with live Socket.IO updates; Three.js 3D threat graph *(Phase 2)* |
+   On the first run the log shows Flyway applying `V1__init_schema` and `V2__security_features`, then the
+   blockchain check passing
+   (chain 31337, contract code present, operator is the contract admin).
 
-All backend services are containerized and orchestrated via **Docker Compose**, so the entire stack starts with a single command. Client apps run outside the container boundary since they execute on the user's own device.
+8. **Start the frontend** (terminal D)
 
----
+   ```powershell
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-## Tech Stack
+9. **Check that it works**
 
-| Layer | Technology |
-|-------|------------|
-| Web Frontend | React, Vite, Tailwind CSS (Three.js / WebGL graph: Phase 2) |
-| Mobile Frontend | Flutter *(Phase 2)* |
-| Backend Orchestrator | Node.js, Express.js |
-| AI Risk Engine | Python, FastAPI, rule-based scorer (scikit-learn Isolation Forest: Phase 2) |
-| Blockchain | Solidity, Hardhat, ethers.js |
-| Structured Database | PostgreSQL 16 (Supabase-compatible) |
-| Unstructured Database | MongoDB |
-| Automation | n8n *(Phase 2)* |
-| Messaging / OTP | Email over SMTP (Nodemailer); Mailpit as the local inbox in the demo |
-| Containerization | Docker, Docker Compose |
-| Version Control / PM | GitHub, GitHub Projects |
+   - `curl.exe http://localhost:8080/actuator/health` returns `{"status":"UP"}`.
+   - Open `http://localhost:5173`, register the administrator wallet, then log in: the Admin Dashboard appears.
+   - Register and log in with the second wallet: the user Dashboard appears, and opening `/admin`
+     shows a "no permission" page.
+   - As administrator, revoke the second wallet (MetaMask asks you to sign a confirmation): its next
+     request is signed out and its next login is refused. Reactivating it is a request that the server
+     carries out after `ADMIN_ACTION_DELAY`; it is listed under Admin → Controls until then.
 
----
+## Configuration
 
-## Login Flow
+All settings live in one `.env.local` file in the repository root. It is git-ignored; `.env.example` lists
+every variable with placeholders. Real environment variables override the file. The frontend and the
+contracts project need no environment variables.
 
-```
-Client                Gateway            Orchestrator          AI Engine        Smart Contract
-  |  1. Login request     |                    |                    |                  |
-  |---------------------->                     |                    |                  |
-  |                       | 2. Token bucket    |                    |                  |
-  |                       |    check           |                    |                  |
-  |                       |------------------->                     |                  |
-  |                       |                    | 3. LRU cache check |                  |
-  |                       |                    | 4. Update threat   |                  |
-  |                       |                    |    graph           |                  |
-  |                       |                    |------------------->  5. Score + BFS   |
-  |                       |                    <-------------------|  6. Trust Score   |
-  |                       |                    |                    |                  |
-  |                       |        7. Route: high / medium (OTP) / low (block)         |
-  |  8. Sign nonce        |                    |                    |                  |
-  <-----------------------+--------------------|                    |                  |
-  |---------------------------------------------------------------------------->      |
-  |                       |                    | 9. verifySignature()                  |
-  |                       |                    | 10. Create + cache session            |
-  |                       |                    | 11. Queue event for Merkle batching   |
-  |                       |                    | 12. Push update -> admin dashboard    |
-```
+| Name | Purpose | Required |
+|---|---|---|
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | The application's Neon branch (JDBC URL, role, password) | Yes |
+| `TEST_DB_URL`, `TEST_DB_USERNAME`, `TEST_DB_PASSWORD` | Neon `test` branch | For integration tests |
+| `BLOCKCHAIN_RPC_URL` | JSON-RPC endpoint, `http://127.0.0.1:8545` locally | Yes |
+| `BLOCKCHAIN_CHAIN_ID` | Expected chain ID, `31337` locally | Yes |
+| `CONTRACT_ADDRESS` | Deployed `WalletRegistry` address | Yes |
+| `BLOCKCHAIN_OPERATOR_PRIVATE_KEY` | Key of the contract admin account; signs register, revoke and activate transactions | Yes |
+| `BLOCKAUTH_ADMIN_WALLETS` | Comma-separated wallet addresses that become `ADMIN` when they register | Needed to have an administrator |
+| `APP_ORIGIN` | Exact origin of the web app, `http://localhost:5173` locally | Yes |
+| `CHALLENGE_TTL_SECONDS` | Lifetime of a challenge, default `120` | No |
+| `SESSION_TIMEOUT` | Idle session timeout, default `30m` | No |
+| `SESSION_COOKIE_SECURE` | `Secure` cookie flag: `false` on `http://localhost`, `true` when deployed (default `true`) | No |
+| `SPRING_PROFILES_ACTIVE` | `dev`, `test` or `prod`; set it as a real environment variable | No |
+| `SECOND_STEP_ENCRYPTION_KEY` | 32 random bytes, Base64: encrypts the authenticator secrets and keys the backup-code hashes in the database. Generate it as `.env.example` shows; keep it with the other secrets. Losing or changing it makes every enrolled second step unusable (administrators can reset them). | Yes |
+| `TRUSTED_DEVICE_DAYS` | How long a device that passed the second step is trusted, default `30` | No |
+| `ADMIN_ACTION_DELAY` | Waiting period before a reactivation, second-step reset or lifting of the emergency stop takes effect, default `10m` (between `1s` and `7d`) | No |
 
-**Circuit Breaker:** if anomalous logins within a rolling window exceed a configured threshold, the Orchestrator calls `pauseAuth()`, all further logins are rejected regardless of Trust Score, customer sessions end, and the admin dashboard is told live (the n8n admin alert is Phase 2) — until an administrator explicitly resumes the system.
+Secrets are `DB_PASSWORD`, `TEST_DB_PASSWORD`, `BLOCKCHAIN_OPERATOR_PRIVATE_KEY` and
+`SECOND_STEP_ENCRYPTION_KEY`. Never commit them.
+The private keys that `hardhat node` prints are public knowledge: use them only on the local chain.
 
----
+## Tests
 
-## AI Risk Engine
+| What | Needs | Command |
+|---|---|---|
+| Contract tests | nothing running | `cd contracts; npx hardhat test` |
+| Backend unit tests | nothing running | `cd backend; .\mvnw.cmd test` |
+| Backend unit and integration tests | `TEST_DB_*` in `.env.local` | `cd backend; .\mvnw.cmd verify` |
+| Same, plus tests against the real chain | also `hardhat node` running with the contract deployed | `cd backend; .\mvnw.cmd verify -Pblockchain-it` |
+| Frontend production build | nothing running | `cd frontend; npm run build` |
 
-### Feature Extraction
+The integration tests empty the application tables before every test. Point `TEST_DB_*` at a
+branch used for nothing else, never at the branch `DB_URL` points at.
 
-| Feature | Description |
-|---------|-------------|
-| Device fingerprint delta | Does the current device match one previously seen for this wallet? |
-| IP reputation / geolocation delta | Does the current IP/location differ meaningfully from recent history? |
-| Time-of-day pattern | Is the login time consistent with the user's historical pattern? |
-| Login velocity | Number of attempts for this wallet/IP within a recent window |
-| Graph distance | BFS distance from this login's node to the nearest known bad-actor node |
+### API checks with Postman
 
-### Baseline Scoring (Rule-Based)
+Import `postman/BlockAuth.postman_collection.json` and run it against the running local stack. The
+folders cover authentication without a signature, authorization, validation and injection, CSRF, rate
+limiting and the administrator endpoints.
 
-| Signal | Score Impact |
-|--------|--------------|
-| New / unrecognized device | -30 |
-| New / unrecognized IP or region | -20 |
-| Off-hours login | -10 |
-| High login velocity from same IP | -25 |
-| Short graph distance to known bad actor | -35 |
-| All signals normal | 0 (baseline 100) |
+Postman cannot sign as MetaMask. For the requests marked USER or ADMIN, log in through the browser,
+copy the value of the `BLOCKAUTH_SESSION` cookie from the developer tools into the `userSession` or
+`adminSession` collection variable, and run again; those requests are skipped while the variable is
+empty. Changes that need a fresh wallet signature (revoking, reactivating, the emergency stop, flags, API
+keys, the second step) cannot be signed from Postman either; the collection checks that they are refused
+without one. The collection sends failing requests on purpose, so wait a minute between runs.
 
-### Routing
+### Security scan
 
-| Trust Score | Route |
-|-------------|-------|
-| **>= 90** | Straight to signature verification |
-| **50 - 89** | Email OTP step-up, then signature verification |
-| **< 50** | Blocked and logged |
+`security-tests/zap/README.md` describes the OWASP ZAP baseline and active scans. Scan only your own
+local stack.
 
-**Upgrade path:** an **Isolation Forest** anomaly-detection model is the proposed successor to the rule-based baseline — it needs no labeled fraud data (scarce for a student project) and naturally isolates rare, anomalous feature combinations.
+## Docker (optional)
 
-**Threat Graph:** adjacency list keyed by wallet/IP/device nodes; a login adds an edge between the wallet and the IP/device used. A bounded BFS (3 hops max) runs from each new node to measure proximity to any flagged bad actor — `O(V' + E')` for the bounded neighborhood explored.
+Docker packages the local stack: the Hardhat node, the backend, and the frontend behind nginx on port
+3000. The database stays on Neon, so `.env.local` must already hold the `DB_*` values. Compose points the
+backend at the containerized chain and sets the application origin to `http://localhost:3000` itself.
+Stop any local `hardhat node` and backend first: the containers use ports 8545 and 8080. All three
+ports are published on this machine only (`127.0.0.1`), because the chain node's accounts are public
+test keys.
 
----
-
-## Data Structures and Algorithms
-
-Every structure was chosen to solve a specific bottleneck — not for demonstration alone.
-
-| Structure / Algorithm | Used For | Time | Space |
-|---|---|---|---|
-| **Token Bucket** | Rate limiting incoming requests | O(1) | O(1) per IP |
-| **Sliding Window Counter** | Smoothing burst-traffic detection | O(1) amortized | O(w) |
-| **LRU Cache** (HashMap + doubly linked list) | O(1) session validation and eviction | O(1) avg | O(k) |
-| **Graph (adjacency list) + BFS** | Fraud-ring proximity detection | O(V'+E') bounded | O(V') |
-| **Merkle Tree** | Tamper-evident audit batching | O(n) build | O(n) |
-| **Merkle Proof Verification** | Verifying single-event authenticity | O(log n) | O(log n) |
-| **Min-Heap** | Risk-ranked admin triage (top-N riskiest) | O(log k) | O(k) |
-
-**Highlights:** Merkle proof verification is logarithmic in batch size, so even large batches stay cheap to verify independently. Every hot-path check on every request — rate limiting and session lookup — is **O(1)**, so the added security layers introduce no meaningful latency penalty over a conventional password check.
-
-<details>
-<summary><strong>Reference implementations (click to expand)</strong></summary>
-
-**LRU Session Cache (Python)**
-```python
-class Node:
-    def __init__(self, key, value):
-        self.key, self.value = key, value
-        self.prev = self.next = None
-
-class LRUCache:
-    def __init__(self, capacity: int):
-        self.capacity = capacity
-        self.map = {}
-        self.head, self.tail = Node(0, 0), Node(0, 0)
-        self.head.next, self.tail.prev = self.tail, self.head
-
-    def _remove(self, node):
-        node.prev.next, node.next.prev = node.next, node.prev
-
-    def _add_front(self, node):
-        node.next, node.prev = self.head.next, self.head
-        self.head.next.prev, self.head.next = node, node
-
-    def get(self, key):
-        if key not in self.map:
-            return None
-        node = self.map[key]
-        self._remove(node); self._add_front(node)
-        return node.value
-
-    def put(self, key, value):
-        if key in self.map:
-            self._remove(self.map[key])
-        node = Node(key, value)
-        self.map[key] = node
-        self._add_front(node)
-        if len(self.map) > self.capacity:
-            lru = self.tail.prev
-            self._remove(lru)
-            del self.map[lru.key]
+```powershell
+docker compose up -d --build hardhat
+docker compose logs hardhat
 ```
 
-**Token Bucket Rate Limiter (Node.js / Express)**
-```javascript
-class TokenBucket {
-  constructor(capacity, refillRatePerSec) {
-    this.capacity = capacity;
-    this.tokens = capacity;
-    this.refillRate = refillRatePerSec;
-    this.lastRefill = Date.now();
-  }
-  _refill() {
-    const now = Date.now();
-    const elapsed = (now - this.lastRefill) / 1000;
-    this.tokens = Math.min(this.capacity, this.tokens + elapsed * this.refillRate);
-    this.lastRefill = now;
-  }
-  tryConsume(count = 1) {
-    this._refill();
-    if (this.tokens >= count) { this.tokens -= count; return true; }
-    return false;
-  }
-}
+Copy the Account #0 private key into `BLOCKCHAIN_OPERATOR_PRIVATE_KEY`, then deploy:
 
-function rateLimitMiddleware(req, res, next) {
-  const ip = req.ip;
-  if (!buckets.has(ip)) buckets.set(ip, new TokenBucket(10, 1 / 3));
-  buckets.get(ip).tryConsume(1) ? next() : res.status(429).json({ error: 'Too many requests' });
-}
+```powershell
+docker compose exec hardhat npx hardhat run scripts/deploy.js --network localhost
 ```
 
-**Merkle Tree Construction and Proof Verification (Python)**
-```python
-import hashlib
+Set `CONTRACT_ADDRESS` to the printed address and start the rest:
 
-def sha256(data: bytes) -> bytes:
-    return hashlib.sha256(data).digest()
-
-def build_merkle_tree(leaves):
-    layer = [sha256(leaf) for leaf in leaves]
-    tree = [layer]
-    while len(layer) > 1:
-        if len(layer) % 2 == 1:
-            layer.append(layer[-1])
-        layer = [sha256(layer[i] + layer[i + 1]) for i in range(0, len(layer), 2)]
-        tree.append(layer)
-    return tree  # tree[-1][0] is the Merkle root
-
-def get_merkle_proof(tree, index):
-    proof = []
-    for layer in tree[:-1]:
-        pair_index = index ^ 1
-        if pair_index < len(layer):
-            proof.append(layer[pair_index])
-        index //= 2
-    return proof
-
-def verify_merkle_proof(leaf, proof, root, index):
-    computed = sha256(leaf)
-    for sibling in proof:
-        computed = sha256(computed + sibling) if index % 2 == 0 else sha256(sibling + computed)
-        index //= 2
-    return computed == root
+```powershell
+docker compose up -d --build backend frontend
 ```
 
-**Threat Graph with Bounded BFS (Python)**
-```python
-from collections import defaultdict, deque
+Open `http://localhost:3000`. `docker compose down` discards the chain: deploy again, update
+`CONTRACT_ADDRESS` and reset the development data (below).
 
-class ThreatGraph:
-    def __init__(self):
-        self.adj = defaultdict(set)
-        self.bad_actors = set()
+## Resetting local state
 
-    def add_edge(self, a, b):
-        self.adj[a].add(b); self.adj[b].add(a)
+The local chain is empty every time `hardhat node` restarts, while the database still remembers the
+wallets. After a restart:
 
-    def flag_bad_actor(self, node):
-        self.bad_actors.add(node)
+1. Deploy the contract again and put the printed address in `CONTRACT_ADDRESS`.
+2. Empty the application tables in the Neon SQL editor, on the branch `DB_URL` points at. This
+   deletes every user and event there:
 
-    def bfs_distance_to_bad_actor(self, start, max_hops=3):
-        visited = {start}
-        queue = deque([(start, 0)])
-        while queue:
-            node, dist = queue.popleft()
-            if node in self.bad_actors and node != start:
-                return dist
-            if dist >= max_hops:
-                continue
-            for neighbor in self.adj[node]:
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append((neighbor, dist + 1))
-        return None
-```
+   ```sql
+   TRUNCATE users, authentication_challenges, authentication_events, security_events RESTART IDENTITY CASCADE;
+   ```
 
-**Min-Heap for Risk-Ranked Admin View (Python)**
-```python
-import heapq
+3. Restart the backend and register the wallets again.
 
-class RiskRankedAttempts:
-    def __init__(self):
-        self._heap = []
+To rebuild the schema itself, run `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` on that same
+branch and restart the backend; Flyway recreates everything. Never edit an applied migration: add a
+new `V<n>__<description>.sql` file in `backend/src/main/resources/db/migration`.
 
-    def add_attempt(self, attempt_id, trust_score, data):
-        heapq.heappush(self._heap, (trust_score, attempt_id, data))
+## Account security
 
-    def top_n_riskiest(self, n=10):
-        return heapq.nsmallest(n, self._heap)
-```
+A wallet signature proves who is signing, but not that the signer is the rightful owner: anyone who has
+the wallet can sign. These measures limit the damage and make it visible.
 
-</details>
-
----
-
-## Smart Contract
-
-**Contract:** `AuthRegistry.sol` (Solidity `^0.8.25`, uses OpenZeppelin's audited ECDSA library)
-
-| Function | Description |
-|----------|-------------|
-| `registerUser(address)` | Admin-only: registers a customer's wallet, once per wallet. The backend sends the transaction, so the wallet is a parameter rather than `msg.sender` |
-| `verifySignature(address, nonce, signature)` | Recovers the signer and validates against registration; rejects reused nonces |
-| `submitMerkleRoot(bytes32 root)` | Admin-only — anchors a batched Merkle root on-chain |
-| `pauseAuth()` / `resumeAuth()` | Admin-only — global circuit breaker |
-| `getMerkleRoot(uint256 batchId)` | Returns the root for a historical batch |
-| `transferAdmin(address)` | Admin-only — rotates the admin address |
-
-**Events:** `UserRegistered`, `LoginVerified`, `MerkleRootSubmitted`, `AuthPaused`, `AuthResumed`
-
-**Access control:** `registerUser`, `submitMerkleRoot`, `pauseAuth`, `resumeAuth` and `transferAdmin` are restricted via an `onlyAdmin` modifier. Registering a wallet grants nothing on its own: logging in still requires a signature from that wallet's private key.
-
-**Deployment target:** local Hardhat network for development/demo, with an optional secondary deployment to a public testnet (e.g., Polygon testnet) to demonstrate real network/gas behavior.
-
-<details>
-<summary><strong>Full contract source (click to expand)</strong></summary>
-
-```solidity
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
-
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-
-contract AuthRegistry {
-    using ECDSA for bytes32;
-
-    address public admin;
-    bool public paused;
-    mapping(address => bool) public isRegistered;
-    // Every nonce a wallet has consumed, not only the most recent one.
-    mapping(address => mapping(bytes32 => bool)) public usedNonces;
-    bytes32[] public merkleRoots;
-
-    event UserRegistered(address indexed wallet);
-    event LoginVerified(address indexed wallet, uint256 timestamp);
-    event MerkleRootSubmitted(bytes32 root, uint256 batchId);
-    event AuthPaused(address indexed by);
-    event AuthResumed(address indexed by);
-
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "AuthRegistry: caller is not admin");
-        _;
-    }
-
-    modifier notPaused() {
-        require(!paused, "AuthRegistry: authentication is paused");
-        _;
-    }
-
-    constructor() {
-        admin = msg.sender;
-    }
-
-    function registerUser(address wallet) external onlyAdmin notPaused {
-        require(wallet != address(0), "AuthRegistry: zero address");
-        require(!isRegistered[wallet], "AuthRegistry: already registered");
-        isRegistered[wallet] = true;
-        emit UserRegistered(wallet);
-    }
-
-    function verifySignature(
-        address wallet,
-        bytes32 nonce,
-        bytes calldata signature
-    ) external notPaused returns (bool) {
-        require(isRegistered[wallet], "AuthRegistry: wallet not registered");
-        require(!usedNonces[wallet][nonce], "AuthRegistry: nonce already used");
-
-        bytes32 ethSignedHash = MessageHashUtils.toEthSignedMessageHash(nonce);
-        address recovered = ethSignedHash.recover(signature);
-        require(recovered == wallet, "AuthRegistry: invalid signature");
-
-        usedNonces[wallet][nonce] = true;
-        emit LoginVerified(wallet, block.timestamp);
-        return true;
-    }
-
-    function submitMerkleRoot(bytes32 root) external onlyAdmin {
-        merkleRoots.push(root);
-        emit MerkleRootSubmitted(root, merkleRoots.length - 1);
-    }
-
-    function getMerkleRoot(uint256 batchId) external view returns (bytes32) {
-        require(batchId < merkleRoots.length, "AuthRegistry: invalid batch id");
-        return merkleRoots[batchId];
-    }
-
-    function pauseAuth() external onlyAdmin {
-        paused = true;
-        emit AuthPaused(msg.sender);
-    }
-
-    function resumeAuth() external onlyAdmin {
-        paused = false;
-        emit AuthResumed(msg.sender);
-    }
-
-    function transferAdmin(address newAdmin) external onlyAdmin {
-        require(newAdmin != address(0), "AuthRegistry: zero address");
-        admin = newAdmin;
-    }
-}
-```
-
-**Design notes:** signature recovery uses OpenZeppelin's audited ECDSA library (not a custom implementation); every consumed nonce is remembered per wallet, so an old signature cannot become valid again after a newer login; nonce reuse is prevented per-wallet, directly enforcing replay rejection at the contract level; all state-changing admin functions are gated by `onlyAdmin`; no personally identifiable information is stored on-chain — only registration status, consumed nonces, and Merkle roots.
-
-</details>
-
----
-
-## API Reference
-
-All endpoints are exposed by the Node.js Backend Orchestrator. Requests/responses are JSON; authenticated endpoints require a valid session token.
-
-### Authentication
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/auth/register` | Registers a wallet on-chain and creates its off-chain profile |
-| `POST` | `/api/auth/login` | Starts a login: scores the attempt and returns `allow`, `otp_required` or `blocked`. The single-use nonce is returned with an `allow` |
-| `POST` | `/api/auth/otp/verify` | Verifies the OTP code for the medium-risk path and returns the nonce |
-| `POST` | `/api/auth/otp/resend` | Emails a new code for the same attempt, at most every 30 seconds and three codes in all; the old code stops working |
-| `POST` | `/api/auth/verify` | Submits the signed nonce, verifies it on-chain and creates the session |
-| `POST` | `/api/auth/logout` | Invalidates the current session |
-
-Login is **two calls**, not one: the Trust Score is computed and the routing
-decision made before any signature challenge exists. There is deliberately no
-endpoint that issues a nonce without scoring the attempt first.
-
-**`POST /api/auth/login`**
-
-Request:
-```json
-{
-  "wallet_address": "0x9F3a...c21B",
-  "device_fingerprint": "a1b2c3..."
-}
-```
-
-Response:
-```json
-{
-  "decision": "otp_required",
-  "trust_score": 67,
-  "otp_challenge_id": "a1e2d3c4-otp-4455-b667-889900aabbcc",
-  "factors": ["unrecognized_device"]
-}
-```
-
-**`POST /api/auth/verify`**
-
-```json
-{
-  "wallet_address": "0x9F3a...c21B",
-  "nonce": "8f2c...",
-  "signature": "0x..."
-}
-```
-
-```json
-{ "decision": "allow", "trust_score": 96, "session_token": "...", "expires_at": "..." }
-```
-
-**Errors** carry one shape, with a request id that also appears in the
-`X-Request-Id` response header:
-
-```json
-{ "error": { "code": "RATE_LIMITED", "message": "Too many attempts. Please wait a moment.", "request_id": "7f3a..." } }
-```
-
-### Risk and Graph *(Phase 2, not built yet)*
-
-Phase 1 exposes the score only inside each login response and the flags through
-`/api/admin/attempts/top`; these endpoints are planned for the 3D threat graph.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/risk/score/:wallet` | Most recent Trust Score for a wallet |
-| `GET` | `/api/graph/threat` | Current threat graph nodes/edges for visualization |
-| `GET` | `/api/graph/cluster/:id` | Details of a specific flagged fraud cluster |
-
-### Audit
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/audit/events` | Recent login events, each with the batch that sealed it (or `null`) |
-| `GET` | `/api/audit/proof/:eventId` | Merkle proof for a specific login event |
-| `GET` | `/api/audit/root/:batchId` | On-chain Merkle root for a given batch |
-
-### Admin
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/admin/pause` | Calls the smart contract's `pauseAuth()` |
-| `POST` | `/api/admin/resume` | Resumes authentication after a pause |
-| `GET` | `/api/admin/attempts/top` | Top-N riskiest recent attempts (sorted query in Phase 1; the min-heap is Phase 2) |
-| `GET` | `/api/admin/status` | Whether authentication is currently paused |
-
-Admin and audit endpoints require a session whose wallet is listed in
-`ADMIN_WALLETS`; there is no separate admin login.
-
-<details>
-<summary><strong>More sample payloads</strong></summary>
-
-**`GET /api/audit/proof/:eventId`**
-```json
-{
-  "event_id": "f266e00c-dcdd-48a5-8a86-d5bee4913099",
-  "batch_id": 2,
-  "leaf_index": 0,
-  "leaf_hash": "0x4a7e...9d21",
-  "current_leaf_hash": "0x4a7e...9d21",
-  "event": { "eventId": "f266e00c-...", "wallet": "0x7099...79c8", "ip": "...", "deviceFingerprint": "...", "trustScore": 100, "decision": "allow", "timestamp": "..." },
-  "siblings": [{ "hash": "0x88c1...a2", "position": "right" }]
-}
-```
-
-The proof carries no verdict: the browser hashes `event` itself, folds
-`siblings` into a root and compares it with `GET /api/audit/root/:batchId`,
-which reads the root from the contract.
-
-**`GET /api/graph/cluster/:id`** *(Phase 2)*
-```json
-{
-  "cluster_id": "cluster_014",
-  "node_count": 12,
-  "node_ids": ["wallet_x", "wallet_y", "ip_203.0.113.5", "device_hash_a1"],
-  "reason": "shared_device_across_multiple_wallets",
-  "risk_level": "high"
-}
-```
-
-</details>
-
----
-
-## Data Model
-
-### PostgreSQL
-
-Created by the numbered SQL files in `services/orchestrator/migrations/`, applied
-at startup. The schema is plain SQL, so the same files would run unchanged on
-Supabase's hosted PostgreSQL.
-
-**`users`** — `id (uuid, PK)`, `wallet_address (unique)`, `display_name`, `email`, `created_at`, `last_login_at`
-
-**`sessions`** — `id (uuid, PK)`, `user_id (FK)`, `token_hash (unique)`, `trust_score`, `issued_at`, `expires_at`, `revoked_at`
-
-**`nonces`** — `id (uuid, PK)`, `wallet_address`, `nonce_value`, `trust_score`, `device_fingerprint`, `used`, `expires_at`
-
-**`otp_challenges`** — `id (uuid, PK)`, `wallet_address`, `code_hash`, `trust_score`, `device_fingerprint`, `attempts`, `verified`, `expires_at`, `sent_at`, `send_count`
-
-**`audit_batches`** / **`audit_leaves`** — one row per anchored Merkle batch and one per leaf, so a proof can be rebuilt for any past event
-
-No password, code or token is stored in plain text: `sessions` holds a SHA-256
-hash of the session token and `otp_challenges` a SHA-256 hash of the six-digit
-code.
-
-### MongoDB
-
-**`login_events`** — `event_id`, `wallet_address`, `ip_address`, `device_fingerprint`, `trust_score`, `decision`, `verified`, `region`, `timestamp`
-
-**`fraud_flags`** — `cluster_id`, `node_ids[]`, `reason`, `detected_at`
-
-`verified` is true only once the signature has been checked on-chain. Feature
-extraction counts only verified logins as history, so a failed attempt cannot
-make an unfamiliar device look familiar.
-
-### On-Chain
-
-| Storage Item | Description |
+| Measure | What it does |
 |---|---|
-| `isRegistered` mapping | Wallets registered by the admin; `verifySignature` refuses any other |
-| `usedNonces` mapping | Per wallet, every nonce already consumed, so a signature cannot be replayed |
-| `merkleRoots` array | Append-only list of submitted audit-batch roots |
-| `paused` (bool) | Global circuit-breaker flag |
-| `admin` address | Address authorized to call `pauseAuth()` / `resumeAuth()` |
+| Standard sign-in message | Every message follows the Sign-In with Ethereum (EIP-4361) message format: site, wallet, a plain statement, nonce, chain and expiry, so MetaMask and the user can see exactly what is signed and for which site. This covers the text only: the server checks each signature against its own stored copy of the message (one use, two minutes), not with a SIWE library, so this is not a claim of full SIWE compliance. |
+| Sessions and devices | Account security lists every signed-in session and device. Ending one, "sign out everywhere else" or forgetting a device takes effect on that session's next request, because every request checks the server-side session record. |
+| New sign-in alerts | A sign-in on a device the wallet has not used before is shown on its other sessions, with "This was me" and "This was not me" (which signs that device out). The alerts are shown in the app only; nothing is sent by e-mail or push. |
+| Second step | Optional authenticator-app codes (TOTP, RFC 6238) plus ten one-time backup codes. Asked for only when a sign-in does not look like the wallet's usual one; the device it is passed on becomes trusted for `TRUSTED_DEVICE_DAYS`. |
+| Trust score | Each sign-in whose signature checks out starts at 100 and loses points for a new device, a new network, a flagged wallet, repeated failures from the same address, or a device shared with a flagged wallet. High scores sign in; lower ones need the second step, or are refused when the wallet has none. Administrators see every score under Security → Sign-in risk. |
+| Fresh signature for dangerous actions | Revoking or reactivating a wallet, the emergency stop, flags, second-step changes and API keys need a new MetaMask signature over a one-time message naming the action and its parameters, on top of the session. A stolen session cookie alone cannot do them. |
+| Emergency stop | Switched on at once by an administrator; refuses registrations, reactivations, second-step resets, removing flags and new API keys, and optionally sign-ins by users. Administrators can always sign in. It controls this application only: the contract can still be called directly with the operator key. |
+| Waiting period for administrator actions | Reactivating a wallet, resetting a second step and lifting the emergency stop take effect after `ADMIN_ACTION_DELAY`. Any administrator can cancel them meanwhile. If carrying one out fails, it goes back to the queue, is tried again a minute later and can still be cancelled. Revoking a wallet is never delayed. |
+| Limited-purpose API keys | Read-only keys for scripts (`users:read`, `audit:read`, `wallet-status:read`), sent as the `X-API-Key` header, valid for at most 90 days, shown once and stored only as a hash. A key stops working when it is revoked, expires, or its owner is no longer an active administrator. |
 
----
+## Troubleshooting
 
-## Project Structure
+| Symptom | Cause and fix |
+|---|---|
+| Backend stops at startup with a blockchain error | The node is on another chain ID, `CONTRACT_ADDRESS` has no contract code, or the operator key is not the contract admin. Usually the chain was restarted: deploy again and update `CONTRACT_ADDRESS`. If the node is simply not running, the backend starts and answers 503 on blockchain-backed requests until it is. |
+| `Port 8080 was already in use` | Another program holds the port. Stop it; the port is fixed because the dev proxy and the Docker setup point at it. `Get-NetTCPConnection -LocalPort 8080` shows the owning process. The same applies to 5173 (frontend), 8545 (chain) and, with Docker, 3000. |
+| Login says the wallet is not registered although it was | The chain was reset. Follow "Resetting local state". |
+| `429` with "Too many failed attempts" | Ten failed sign-ins from one address block it for 15 minutes. Limits live in memory: restarting the backend clears them. |
+| MetaMask shows nothing after clicking a button | A request is already waiting. Open the MetaMask extension and answer it. |
+| "Registration is incomplete" at login | The wallet was written to the blockchain but the user record was not saved. Run registration again; it completes without a second transaction. |
+| A wallet listed in `BLOCKAUTH_ADMIN_WALLETS` logs in as a normal user | The role is given once, when the wallet registers, and the backend reads the list only at startup. The wallet registered before it was listed, the backend was not restarted, or the listed address is a different account. Roles are never changed afterwards; to start over locally, follow "Resetting local state". |
+| Backend stops at startup naming `BLOCKAUTH_ADMIN_WALLETS` | An entry is not a valid wallet address (0x and 40 hexadecimal characters, with a correct checksum if written in mixed case). List public addresses only, separated by commas; never a private key. |
+| Every administrator wallet is revoked | Reactivate one from the Hardhat console with the operator account (below), or list a new wallet in `BLOCKAUTH_ADMIN_WALLETS` and register it. |
+| Backend stops at startup naming `SECOND_STEP_ENCRYPTION_KEY` | The variable is missing or is not 32 bytes in Base64. Generate one as `.env.example` shows. The error never prints the value. |
+| Login asks for a verification code | The wallet has the second step on and this sign-in scored below the "allow" threshold, usually because the device or network is new. Enter the code from the authenticator app or a backup code, in the same browser, within five minutes. |
+| Login says the sign-in "does not look like your usual sign-ins" | The trust score was too low and the wallet has no second step. Sign in from a device used before, or turn on the second step. An administrator can see the reasons under Security → Sign-in risk. |
+| A user lost their authenticator and all backup codes | An administrator requests a reset under Admin → Controls; it takes effect after the waiting period. Confirm who the user is outside BlockAuth first. |
+| A reactivation did not happen | It waits for `ADMIN_ACTION_DELAY`, and while the emergency stop is on it waits until the stop is lifted. It fails if the administrator who asked is no longer an active administrator by then. Admin → Controls shows its status. |
+| The first request after a break takes several seconds | Neon suspends an idle database. The first connection wakes it; later requests are fast again. |
 
-```
-.
-├── contracts/                       # Solidity smart contracts (AuthRegistry.sol) + Hardhat config
-│   ├── contracts/AuthRegistry.sol
-│   ├── scripts/deploy.ts
-│   ├── test/authRegistry.test.ts
-│   ├── hardhat.config.ts
-│   └── package.json
-├── services/
-│   ├── gateway/                     # Express.js API gateway (rate limiter, request validation)
-│   │   ├── src/middleware/           # tokenBucket.ts, validate.ts, requestId.ts
-│   │   ├── Dockerfile
-│   │   └── package.json
-│   ├── orchestrator/                # Node.js backend (login flow, sessions, OTP, audit)
-│   │   ├── migrations/               # 001_users.sql … 007_email_otp.sql
-│   │   ├── src/routes/               # auth.ts, admin.ts, audit.ts
-│   │   ├── src/core/                 # loginStateMachine.ts, sessions.ts, nonces.ts
-│   │   ├── src/ds/lruCache.ts        # hand-written LRU cache
-│   │   ├── src/otp/                  # code generation, verification, resend, email delivery
-│   │   ├── src/chain/                # ethers client for AuthRegistry
-│   │   ├── src/audit/                # merkleTree.ts, batcher.ts
-│   │   ├── Dockerfile
-│   │   └── package.json
-│   └── risk-engine/                 # Python / FastAPI risk scoring + threat graph (BFS)
-│       ├── app/
-│       │   ├── main.py              # FastAPI endpoints: POST /score, POST /event, GET /health
-│       │   ├── features.py          # Feature extraction (device, region, time, velocity)
-│       │   ├── geo.py               # Offline IP geolocation lookup
-│       │   ├── scorers/rules.py     # Rule-based Trust Score calculator
-│       │   └── graph/
-│       │       ├── threat_graph.py  # Adjacency-list graph (wallet/IP/device nodes)
-│       │       └── bfs.py           # Bounded BFS (3-hop fraud proximity)
-│       ├── data/demo_geo_overrides.json
-│       ├── tests/                   # pytest suite (63 tests)
-│       ├── requirements.txt
-│       └── Dockerfile
-├── apps/
-│   ├── web/                         # React sign-in UI and operations console
-│   │   ├── src/
-│   │   │   ├── App.tsx
-│   │   │   └── pages/admin/Attempts.tsx
-│   │   └── package.json
-│   └── mobile/                      # Flutter companion app: placeholder (Phase 2)
-│       └── lib/main.dart
-├── scripts/
-│   ├── seed.ts                      # Demo data seeder (5 wallets + 1 fraud ring)
-│   └── scenarios/s1.ts - s6.ts      # Scripted demo scenarios (PRD S1-S6)
-├── automation/n8n/workflows/        # n8n workflows (Phase 2; empty today)
-├── docker-compose.yml               # Single-command full-stack orchestration
-├── docker-compose.dev.yml           # Development overlay: publishes 3001 and 8001 locally
-├── .env.example                     # Environment variable template
-├── .gitignore
-└── README.md
+Reactivating a wallet directly on the local chain (account #0 is the contract admin):
+
+```powershell
+cd contracts
+npx hardhat console --network localhost
 ```
 
----
-
-## Getting Started
-
-### Prerequisites
-- Docker and Docker Compose
-- Node.js (LTS)
-- Python 3.10+
-- MetaMask (or compatible wallet extension) for local testing
-- Optional: an SMTP account (for example Gmail with an App Password) to email codes to real inboxes; the demo uses a local Mailpit inbox and needs none
-
-### Local Deployment
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/abhinandbs12/ai-augmented-decentralized-authentication-system.git
-cd ai-augmented-decentralized-authentication-system
-
-# 2. Configure environment variables
-cp .env.example .env
-# Set ADMIN_WALLETS and INTERNAL_API_TOKEN. The SMTP values are only needed to
-# email the step-up code to real inboxes; everything else has a working default.
-#
-# Without SMTP settings the step-up code reaches nobody, so plain
-# `docker compose up` cannot finish that route by hand. The development overlay
-# below adds Mailpit, a local mail server whose inbox is http://localhost:8025,
-# and sends every code there.
-
-# 3. Build and start the whole stack
-docker compose build
-docker compose up
-
-# The chain, the contract deployment, both databases, the risk engine, the
-# orchestrator and the gateway all start in order. Only the gateway (3000) is
-# published to the network; the Hardhat RPC (8545) is bound to 127.0.0.1.
-# The chain keeps its state in memory: after a restart the orchestrator
-# re-registers every customer and re-anchors every audit root from PostgreSQL.
-
-# 4. Start the web app (it runs outside the containers)
-cd apps/web && npm install && npm run dev
-# http://localhost:5173
+```js
+const registry = await ethers.getContractAt('WalletRegistry', '<CONTRACT_ADDRESS>')
+await registry.activateWallet('<wallet address>')
 ```
 
-### Seeding and the demo scenarios
+The database mirror corrects itself the next time that wallet logs in. This path skips the waiting
+period, which is why the operator key must be kept as safe as the database password.
 
-The seed and scenario scripts talk to the orchestrator and the risk engine
-directly, so they need the development overlay that publishes those two ports
-on the loopback address (and adds the Mailpit inbox at http://localhost:8025):
+## Repository layout
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-npm install
-npm run seed
-npm run s1        # s1 to s6; s5 trips the circuit breaker
+```text
+contracts/        Hardhat project: WalletRegistry.sol, deployment script, contract tests
+backend/          Spring Boot API: auth, user, admin, blockchain, audit, security, session, secondstep,
+                  risk, apikey, common, config
+frontend/         React single-page app: pages, components, API client, MetaMask wrapper
+postman/          API regression collection
+security-tests/   OWASP ZAP notes
+docker-compose.yml, .env.example
 ```
-
-For a live demonstration, follow [`REVIEWER_DEMO_GUIDE.md`](REVIEWER_DEMO_GUIDE.md).
-What Phase 1 delivers, and what it does not, is in
-[`PHASE1_COMPLETION_REPORT.md`](PHASE1_COMPLETION_REPORT.md).
-
-### Running the Risk Engine Independently
-
-```bash
-cd services/risk-engine
-pip install -r requirements.txt
-python -m pytest tests/ -v          # 63 tests
-uvicorn app.main:app --port 8001    # Requires MongoDB running
-```
-
----
-
-## Testing
-
-| Level | Description |
-|-------|-------------|
-| **Unit** | Token bucket refill logic, LRU eviction order, Merkle tree construction/proofs, isolated contract functions, risk scorer penalties, BFS distance computation, feature extraction |
-| **Integration** | Login flow across orchestrator to AI engine to blockchain client; OTP email through an n8n workflow *(Phase 2)* |
-| **System / E2E** | Full login flow across all three Trust Score paths against the running Docker Compose stack |
-| **Security** | Replay attack attempts, rate-limit bypass attempts, simulated credential-stuffing bursts |
-
-### Sample Test Cases
-
-| ID | Test Case | Expected Result |
-|----|-----------|------------------|
-| TC-01 | Submit valid signature for a fresh nonce | Login succeeds, session created |
-| TC-02 | Re-submit a previously used signature | Login rejected (replay detected) |
-| TC-03 | Exceed token bucket limit from a single IP | HTTP 429 once bucket is empty |
-| TC-04 | Login from a brand-new device/IP for an existing wallet | Trust Score drops into medium band, OTP requested |
-| TC-05 | Simulate 50+ anomalous logins within 10 seconds | Circuit breaker triggers, `pauseAuth()` called |
-| TC-06 | Request a Merkle proof for a known past event | Proof returned and verifies against the on-chain root |
-| TC-07 | Tamper with a stored event, then re-verify its proof | Verification fails, proving tamper detection works |
-
-### Automated tests
-
-| Suite | Count | Command | Coverage |
-|-------|-------|---------|----------|
-| Gateway | 60 | `cd services/gateway && npm test` | Token bucket refill and capacity, request validation, proxy behaviour, error envelope |
-| Orchestrator | 165 | `cd services/orchestrator && npm test` | Login routes end to end, LRU cache, sessions, OTP lifecycle, Merkle tree and proofs, circuit breaker, OTP delivery, configuration |
-| Risk engine | 63 | `cd services/risk-engine && python -m pytest tests/` | Scoring rules, bounded BFS, feature extraction, the `/score` and `/event` endpoints |
-| Contracts | 21 | `cd contracts && npx hardhat test` | Registration, signature verification, replay rejection, pause and resume, Merkle anchoring |
-
-| Risk engine file | Count | Coverage |
-|-----------|-------|----------|
-| `test_rules.py` | 20 | All penalty combinations, clamping at 0/100, score bands, result types |
-| `test_features.py` | 17 | Device recognition, region matching, off-hours detection, login velocity |
-| `test_graph.py` | 15 | BFS at distances 1-4, graph operations, fraud ring patterns |
-| `test_main.py` | 11 | The internal-token guard on `/event`, event upserts, scoring responses |
-
----
-
-## Security Considerations
-
-| Threat | Mitigation |
-|--------|-----------|
-| Credential database breach | Eliminated by design — no passwords/secrets stored server-side |
-| Replay attack | Single-use, expiring nonces; signature valid for one challenge only |
-| Brute-force / bot login flood | Token bucket rejects excess requests before expensive processing |
-| Coordinated fraud ring | Graph-based BFS flags proximity to known bad actors |
-| Tampering with historical records | Merkle-anchored on-chain audit trail |
-| Session hijacking | Short-lived, cached sessions tied to signed authentication events |
-| Mass automated attack | Circuit breaker (`pauseAuth`) halts authentication system-wide |
-
-**Key management:** private keys are generated and held exclusively on the user's own device (browser wallet extension or mobile secure enclave). No backend service ever requests, receives, or stores private key material — a structural property, not a configurable policy.
-
-**Data privacy:** behavioral telemetry (device fingerprint, IP, timestamps) is used exclusively for risk scoring and fraud detection, restricted to backend services.
-
-> A formal third-party smart contract security audit is recommended before any production deployment but is out of scope for this academic project.
-
----
-
-## Success Metrics and KPIs
-
-| Metric | Target |
-|--------|--------|
-| High-trust login completion time | Under 2 seconds end-to-end (local demo) |
-| False-block rate on legitimate test logins | Under 5% during controlled testing |
-| Circuit breaker trigger time under simulated attack | Within 10 seconds of threshold breach |
-| Merkle proof verification success rate | 100% for untampered events; correct failure for tampered events |
-| Functional requirement coverage at final submission | 100% of Must-priority requirements implemented |
-| Live demo completion | Full login-to-dashboard flow without manual intervention |
-
----
-
-## Roadmap and Future Enhancements
-
-- **Zero-Knowledge Proof identity verification** (via Circom / snarkjs) — selective disclosure such as "I am over 18" without revealing underlying data
-- Trained **Isolation Forest** / supervised model replacing the rule-based Trust Score baseline
-- **Multi-chain support** for registration across more than one blockchain network
-- **Enterprise SSO federation** (SAML / OIDC bridge)
-- Formal third-party smart contract security audit
-- Expanded behavioral biometrics (typing rhythm, mouse movement) as additional risk features
-
----
-
-## Competitive and Alternative Approaches
-
-| Approach | Limitation | How This System Differs |
-|----------|-----------|--------------------------|
-| Traditional password + central DB | Single breach exposes all credentials; static verification | No credentials stored anywhere; risk-adaptive verification |
-| Plain wallet login ("Sign in with MetaMask") | Verifies only signature validity; no behavioral context | Adds AI Risk Engine + graph-based fraud detection |
-| Centralized MFA / 2FA | Fixed friction for every login; central DB still exists | OTP applied conditionally, only when risk warrants it |
-| Enterprise SSO (SAML/OIDC) | Still a central identity provider — single point of trust/failure | Identity anchored on a decentralized ledger |
-| Rule-based fraud detection alone | Misses coordinated multi-account fraud rings | Graph + BFS explicitly traces cross-account relationships |
-
-**The novel contribution** is combining a tamper-evident decentralized identity layer with a relationship-aware, risk-adaptive verification layer in one end-to-end system — backed by classical data structures chosen for specific, justified engineering reasons.
-
----
-
-## Team
-
-| Member | Roll Number |
-|--------|--------------|
-| **Karthik R Nair** | 20231CSE0041 |
-| **Sunny Singh** | 20231CSE0095 |
-| **Abhinand Baiju Smitha** | 20231CSE0146 |
-
----
-
-## References
-
-- Ethereum Foundation — Solidity Documentation
-- OWASP — Authentication Cheat Sheet
-- NIST Special Publication 800-63B — Digital Identity Guidelines
-- Liu, F. T., Ting, K. M., & Zhou, Z. H. (2008) — *Isolation Forest*
-
----
-
-## License
-
-This project is an academic submission for the Final Year Project, Department of Computer Science and Engineering. No licence file has been added yet; MIT is the intended licence for the code components.
-
----
-
-<div align="center">
-
-**Built with Blockchain, AI, and Classical Computer Science**
-
-</div>

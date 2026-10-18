@@ -1,0 +1,4 @@
+# Development: also show the DEBUG entries of the error catalog (validation failures, 401s, 404s).
+logging:
+  level:
+    com.blockauth: DEBUG
