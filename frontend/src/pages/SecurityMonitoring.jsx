@@ -75,7 +75,7 @@ function SecurityEvents() {
           { key: 'walletAddress', header: 'Wallet', render: (row) => <Address value={row.walletAddress} /> },
           { key: 'ipAddress', header: 'IP address', render: (row) => <span className="mono">{row.ipAddress}</span> },
           { key: 'result', header: 'Response', render: (row) => <StatusBadge value={row.result} /> },
-          { key: 'description', header: 'Description' },
+          { key: 'description', header: 'Description', wrap: true },
         ]}
       />
       <Pagination page={events.data} onChange={setPage} />
@@ -173,6 +173,7 @@ function SignInRisk() {
           {
             key: 'rules',
             header: 'Why',
+            wrap: true,
             render: (row) => (row.rules ? row.rules.split(',').map(label).join(', ') : 'Nothing unusual'),
           },
           {

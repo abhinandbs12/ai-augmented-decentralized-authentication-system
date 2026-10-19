@@ -9,7 +9,7 @@ import { Address } from './Address';
 export function NavBar() {
   const { user, logout } = useAuth();
   return (
-    <header className="site-header">
+    <header className={user?.role === 'ADMIN' ? 'site-header site-header-admin' : 'site-header'}>
       <div className="container header-inner">
         <Link className="brand" to="/">
           BlockAuth

@@ -5,6 +5,7 @@ import { query, useApi } from '../api/useApi';
 import { Address } from '../components/Address';
 import { AddressField } from '../components/AddressField';
 import { Alert, ErrorAlert } from '../components/Alert';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { DataTable } from '../components/DataTable';
 import { Pagination } from '../components/Pagination';
 import { SelectFilter } from '../components/SelectFilter';
@@ -259,7 +260,7 @@ function FlaggedWallets() {
         empty="No wallets are flagged."
         columns={[
           { key: 'walletAddress', header: 'Wallet', render: (row) => <Address value={row.walletAddress} /> },
-          { key: 'reason', header: 'Reason' },
+          { key: 'reason', header: 'Reason', wrap: true },
           { key: 'flaggedAt', header: 'Flagged', render: (row) => formatDate(row.flaggedAt) },
           {
             key: 'remove',
@@ -319,6 +320,9 @@ function ApiKeys() {
   const [name, setName] = useState('');
   const [scopes, setScopes] = useState([]);
   const [days, setDays] = useState('30');
+  const [revoking, setRevoking] = useState(null);
+  // The same range the server enforces by default (blockauth.security.api-key-max-days); the server checks again.
+  const daysValid = /^\d+$/.test(days) && Number(days) >= 1 && Number(days) <= 90;
 
   function toggle(scope) {
     setScopes((current) => (current.includes(scope) ? current.filter((s) => s !== scope) : [...current, scope]));
@@ -337,8 +341,9 @@ function ApiKeys() {
     }
   }
 
-  async function revoke(id) {
-    await run(() => api.post(`/api/admin/api-keys/${id}/revoke`));
+  async function revoke() {
+    await run(() => api.post(`/api/admin/api-keys/${revoking.id}/revoke`));
+    setRevoking(null);
     keys.reload();
   }
 
@@ -361,9 +366,17 @@ function ApiKeys() {
             </label>
           ))}
         </fieldset>
-        <TextField label="Valid for (days)" value={days} onChange={setDays} inputMode="numeric" maxLength={3} hint="1 to 90." />
+        <TextField
+          label="Valid for (days)"
+          value={days}
+          onChange={setDays}
+          inputMode="numeric"
+          maxLength={3}
+          hint="1 to 90."
+          error={days !== '' && !daysValid ? 'Enter a whole number from 1 to 90.' : null}
+        />
         <div className="actions">
-          <button className="button" type="submit" disabled={busy || !name.trim() || scopes.length === 0 || !Number(days)}>
+          <button className="button" type="submit" disabled={busy || !name.trim() || scopes.length === 0 || !daysValid}>
             {busy ? <Spinner label="Creating…" /> : 'Create key'}
           </button>
         </div>
@@ -393,7 +406,7 @@ function ApiKeys() {
             header: 'Actions',
             render: (row) =>
               row.status === 'ACTIVE' && (
-                <button className="button button-small button-danger" onClick={() => revoke(row.id)} disabled={busy}>
+                <button className="button button-small button-danger" onClick={() => setRevoking(row)} disabled={busy}>
                   Revoke
                 </button>
               ),
@@ -402,6 +415,20 @@ function ApiKeys() {
       />
       <Pagination page={keys.data} onChange={setPage} />
       <ErrorAlert error={error} />
+      <ConfirmDialog
+        open={revoking !== null}
+        title="Revoke this API key?"
+        confirmLabel="Revoke key"
+        danger
+        busy={busy}
+        onConfirm={revoke}
+        onCancel={() => setRevoking(null)}
+      >
+        <p>
+          <strong>{revoking?.name}</strong> stops working at once. This cannot be undone: a script that uses it needs a
+          new key.
+        </p>
+      </ConfirmDialog>
     </section>
   );
 }

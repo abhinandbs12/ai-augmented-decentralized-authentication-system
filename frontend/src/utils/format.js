@@ -15,11 +15,11 @@ export function shortAddress(address) {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-/** WALLET_REVOKED -> "Wallet revoked". The acronyms CSRF and IP stay upper-case. */
+/** WALLET_REVOKED -> "Wallet revoked". The acronyms CSRF, IP and API stay upper-case. */
 export function label(value) {
   if (!value) return '';
   const text = String(value).replaceAll('_', ' ').toLowerCase();
-  return (text.charAt(0).toUpperCase() + text.slice(1)).replace(/\b(csrf|ip)\b/gi, (word) => word.toUpperCase());
+  return (text.charAt(0).toUpperCase() + text.slice(1)).replace(/\b(csrf|ip|api)\b/gi, (word) => word.toUpperCase());
 }
 
 export function formatDate(iso) {

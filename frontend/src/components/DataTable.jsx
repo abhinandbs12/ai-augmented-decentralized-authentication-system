@@ -2,8 +2,8 @@ import { ErrorAlert } from './Alert';
 import { Spinner } from './Spinner';
 
 /**
- * columns: [{ key, header, render?(row) }]; page: a paged API response. Loading, error and empty
- * states are shown in place, so a page never has to branch on them.
+ * columns: [{ key, header, render?(row), wrap? }], where `wrap` marks free text that may wrap; page: a paged
+ * API response. Loading, error and empty states are shown in place, so a page never has to branch on them.
  */
 export function DataTable({ columns, page, loading, error, empty, caption }) {
   const rows = page?.items ?? [];
@@ -24,7 +24,9 @@ export function DataTable({ columns, page, loading, error, empty, caption }) {
           {rows.map((row) => (
             <tr key={row.id}>
               {columns.map((column) => (
-                <td key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
+                <td key={column.key} className={column.wrap ? 'cell-wrap' : undefined}>
+                  {column.render ? column.render(row) : row[column.key]}
+                </td>
               ))}
             </tr>
           ))}

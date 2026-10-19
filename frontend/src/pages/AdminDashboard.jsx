@@ -25,15 +25,15 @@ export function AdminDashboard() {
           <h2>Wallets</h2>
           <dl className="stats">
             <StatCard label="Users" value={data.totalUsers} />
-            <StatCard label="Active wallets" value={data.activeWallets} tone="ok" />
-            <StatCard label="Revoked wallets" value={data.revokedWallets} tone={data.revokedWallets ? 'danger' : undefined} />
+            <StatCard label="Active wallets" value={data.activeWallets} />
+            <StatCard label="Revoked wallets" value={data.revokedWallets} />
           </dl>
 
           <h2>Login attempts</h2>
           <dl className="stats">
             <StatCard label="Authentication attempts" value={data.authenticationAttempts} />
-            <StatCard label="Successful" value={data.successfulAttempts} tone="ok" />
-            <StatCard label="Failed" value={data.failedAttempts} tone={data.failedAttempts ? 'danger' : undefined} />
+            <StatCard label="Successful" value={data.successfulAttempts} />
+            <StatCard label="Failed" value={data.failedAttempts} />
             <StatCard label="Blocked by rate limit" value={data.blockedAttempts} />
           </dl>
 
