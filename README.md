@@ -31,7 +31,6 @@ login with an on-chain identity registry and a hardened, session-based web backe
 - [Deployment](#deployment)
 - [Troubleshooting](#troubleshooting)
 - [Known limitations](#known-limitations)
-- [License](#license)
 
 ## Key features
 
@@ -470,7 +469,3 @@ TRUNCATE users, authentication_challenges, authentication_events, security_event
   than tuned figures.
 - Supported browser: desktop Chrome with the MetaMask extension. Mobile is not supported.
 - Only one local chain (Hardhat, chain ID 31337) is configured; no public network is set up.
-
-## License
-
-No license file is included in this repository.
