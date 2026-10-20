@@ -1926,7 +1926,7 @@ flowchart TB
 |---|
 | **Karthik R Nair** |
 | **Sunny Singh** |
-| **Abhinand Biju Smitha** |
+| **Abhinand Baiju Smitha** |
 
 ---
 
